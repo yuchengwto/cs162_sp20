@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := default
 
 CC?=gcc
-CFLAGS?=-Wall
+CFLAGS?=-Wall -g
 SOURCES=main.c word_count.c
 # comment the following out if you are providing your own sort_words
 LIBRARIES=wc_sort.o

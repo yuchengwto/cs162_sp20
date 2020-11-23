@@ -51,7 +51,7 @@ WordCount *find_word(WordCount *wchead, char *word) {
   char *cword;
 
   do {
-    cword = wchead->word;
+    cword = wc->word;
     if (strcmp(word, cword) == 0) {
       break;
     }
@@ -66,9 +66,12 @@ void add_word(WordCount **wclist, char *word) {
   if (wc != NULL) {
     wc->count++;
   } else {
-    WordCount nwc = {new_string(word), 1, NULL};
-    int len = len_words(*wclist);
-    wclist[len] = &nwc;
+    // create a new WordCount pointer
+    wc = (WordCount*)malloc(sizeof(WordCount));
+    wc->word = new_string(word);
+    wc->count = 1;
+    wc->next = *wclist;
+    *wclist = wc;
   }
 }
 
