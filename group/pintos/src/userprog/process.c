@@ -53,6 +53,21 @@ static void start_process(void* file_name_) {
   struct intr_frame if_;
   bool success;
 
+  // Allocate memory addr to argv
+  size_t fn_sz = strlen(file_name) + 1; // +1 means add a \0
+  char *token;
+  char *save_ptr;
+  int offset = file_name - (char*)PHYS_BASE + fn_sz;
+  size_t argc = 0;
+  char *argv[128];  // Up to 128 args
+
+  token = strtok_r(file_name, " ", &save_ptr);
+  while (token != NULL) {
+    argv[argc++] = token - offset;
+    token = strtok_r(NULL, " ", &save_ptr);
+  }
+  argv[argc] = NULL;
+
   /* Initialize interrupt frame and load executable. */
   memset(&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -60,10 +75,30 @@ static void start_process(void* file_name_) {
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load(file_name, &if_.eip, &if_.esp);
 
+  // Memory copy from file_name to argv[0]
+  if_.esp -= fn_sz;
+  memcpy(if_.esp, file_name, fn_sz);
+
   /* If load failed, quit. */
   palloc_free_page(file_name);
   if (!success)
     thread_exit();
+
+  // Fill stack-align empty space after argv[0][...]
+  size_t ep_sz = 16 - (fn_sz + (argc+3)*4) % 16;
+  if_.esp -= ep_sz;
+  memset(if_.esp, 0, ep_sz);
+
+  // Fill argv array
+  if_.esp -= (argc+1)*4;
+  memcpy(if_.esp, argv, (argc+1)*4);
+  if_.esp -= 4;
+  *(char ***)(if_.esp) = (char **)(if_.esp + 4);
+  if_.esp -= 4;
+  *(int *)if_.esp = argc;
+  if_.esp -= 4;
+  memset(if_.esp, 0, sizeof(int));
+
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
