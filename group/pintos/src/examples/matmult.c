@@ -32,23 +32,26 @@ int A[DIM][DIM];
 int B[DIM][DIM];
 int C[DIM][DIM];
 
-int main(void) {
+int
+main (void)
+{
   int i, j, k;
 
   /* Initialize the matrices. */
   for (i = 0; i < DIM; i++)
-    for (j = 0; j < DIM; j++) {
-      A[i][j] = i;
-      B[i][j] = j;
-      C[i][j] = 0;
-    }
+    for (j = 0; j < DIM; j++)
+      {
+	A[i][j] = i;
+	B[i][j] = j;
+	C[i][j] = 0;
+      }
 
   /* Multiply matrices. */
   for (i = 0; i < DIM; i++)
     for (j = 0; j < DIM; j++)
       for (k = 0; k < DIM; k++)
-        C[i][j] += A[i][k] * B[k][j];
+	C[i][j] += A[i][k] * B[k][j];
 
   /* Done. */
-  exit(C[DIM - 1][DIM - 1]);
+  exit (C[DIM - 1][DIM - 1]);
 }

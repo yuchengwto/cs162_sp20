@@ -1,17 +1,19 @@
-CFLAGS=-g -Wall -std=c99 -D_POSIX_SOURCE -D_BSD_SOURCE -D_XOPEN_SOURCE=700 -fPIC
-TEST_CFLAGS=-Wl,-rpath=.
-TEST_LDFLAGS=-ldl
+CC=gcc
+CFLAGS=-g -ggdb3 -Wall -std=gnu99
+LDFLAGS=-pthread
+EXECUTABLES=httpserver forkserver threadserver poolserver
+SOURCE=httpserver.c libhttp.c wq.c
 
-all: hw3lib.so mm_test
+all: $(EXECUTABLES)
 
-hw3lib.so: mm_alloc.o
-	gcc -shared -o $@ $^
-
-mm_alloc.o: mm_alloc.c
-	gcc $(CFLAGS) -c -o $@ $^
-
-mm_test: mm_test.c
-	gcc $(CFLAGS) $(TEST_CFLAGS) -o $@ $^ $(TEST_LDFLAGS)
+httpserver: $(SOURCE)
+	$(CC) $(CFLAGS) $(LDFLAGS) -D BASICSERVER $(SOURCE) -o $@
+forkserver: $(SOURCE)
+	$(CC) $(CFLAGS) $(LDFLAGS) -D FORKSERVER $(SOURCE) -o $@
+threadserver: $(SOURCE)
+	$(CC) $(CFLAGS) $(LDFLAGS) -D THREADSERVER $(SOURCE) -o $@
+poolserver: $(SOURCE)
+	$(CC) $(CFLAGS) $(LDFLAGS) -D POOLSERVER $(SOURCE) -o $@
 
 clean:
-	rm -rf hw3lib.so mm_alloc.o mm_test
+	rm -f $(EXECUTABLES)

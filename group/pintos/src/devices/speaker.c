@@ -5,39 +5,48 @@
 #include "devices/timer.h"
 
 /* Speaker port enable I/O register. */
-#define SPEAKER_PORT_GATE 0x61
+#define SPEAKER_PORT_GATE	0x61
 
 /* Speaker port enable bits. */
-#define SPEAKER_GATE_ENABLE 0x03
+#define SPEAKER_GATE_ENABLE	0x03
 
 /* Sets the PC speaker to emit a tone at the given FREQUENCY, in
    Hz. */
-void speaker_on(int frequency) {
-  if (frequency >= 20 && frequency <= 20000) {
-    /* Set the timer channel that's connected to the speaker to
+void
+speaker_on (int frequency)
+{
+  if (frequency >= 20 && frequency <= 20000)
+    {
+      /* Set the timer channel that's connected to the speaker to
          output a square wave at the given FREQUENCY, then
          connect the timer channel output to the speaker. */
-    enum intr_level old_level = intr_disable();
-    pit_configure_channel(2, 3, frequency);
-    outb(SPEAKER_PORT_GATE, inb(SPEAKER_PORT_GATE) | SPEAKER_GATE_ENABLE);
-    intr_set_level(old_level);
-  } else {
-    /* FREQUENCY is outside the range of normal human hearing.
+      enum intr_level old_level = intr_disable ();
+      pit_configure_channel (2, 3, frequency);
+      outb (SPEAKER_PORT_GATE, inb (SPEAKER_PORT_GATE) | SPEAKER_GATE_ENABLE);
+      intr_set_level (old_level);
+    }
+  else
+    {
+      /* FREQUENCY is outside the range of normal human hearing.
          Just turn off the speaker. */
-    speaker_off();
-  }
+      speaker_off ();
+    }
 }
 
 /* Turn off the PC speaker, by disconnecting the timer channel's
    output from the speaker. */
-void speaker_off(void) {
-  enum intr_level old_level = intr_disable();
-  outb(SPEAKER_PORT_GATE, inb(SPEAKER_PORT_GATE) & ~SPEAKER_GATE_ENABLE);
-  intr_set_level(old_level);
+void
+speaker_off (void)
+{
+  enum intr_level old_level = intr_disable ();
+  outb (SPEAKER_PORT_GATE, inb (SPEAKER_PORT_GATE) & ~SPEAKER_GATE_ENABLE);
+  intr_set_level (old_level);
 }
 
 /* Briefly beep the PC speaker. */
-void speaker_beep(void) {
+void
+speaker_beep (void)
+{
   /* Only attempt to beep the speaker if interrupts are enabled,
      because we don't want to freeze the machine during the beep.
      We could add a hook to the timer interrupt to avoid that
@@ -50,9 +59,10 @@ void speaker_beep(void) {
      thing, we get called (indirectly) from printf, which should
      always work, even during boot before we're ready to enable
      interrupts. */
-  if (intr_get_level() == INTR_ON) {
-    speaker_on(440);
-    timer_msleep(250);
-    speaker_off();
-  }
+  if (intr_get_level () == INTR_ON)
+    {
+      speaker_on (440);
+      timer_msleep (250);
+      speaker_off ();
+    }
 }

@@ -27,7 +27,3 @@ cscope.files::
 
 cscope:: cscope.files
 	cscope -b -q -k
-
-format::
-	find . -name build -prune -o -type f -name '*.[ch]' -print | \
-	xargs clang-format -i -style=file
