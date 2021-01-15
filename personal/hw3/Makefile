@@ -3,7 +3,6 @@ EXECUTABLES=shell
 
 CC=gcc
 CFLAGS=-g -Wall -std=gnu99
-LDFLAGS=
 
 OBJS=$(SRCS:.c=.o)
 

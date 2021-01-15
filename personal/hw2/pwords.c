@@ -32,24 +32,21 @@
 #include "word_count.h"
 #include "word_helpers.h"
 
-typedef struct thread_word_args
-{
-  word_count_list_t* word_counts;
-  char* filename;
+typedef struct targs {
+  word_count_list_t *wclist;
+  char *filepath;
 } targs_t;
 
 
-void *threadfun(void *arg) {
-  targs_t* targs = (targs_t*)arg;
-  FILE *infile = fopen(targs->filename, "r");
-  if (infile == NULL) {
+void *threadWrapper(void *targs) {
+  targs_t *para = (targs_t *) targs;
+  FILE *fp = fopen(para->filepath, "r");
+  if (fp != NULL) {
+    count_words(para->wclist, fp);
+    fclose(fp);
+  } else {
     perror("fopen");
-    pthread_exit(NULL);
   }
-  // pthread_mutex_lock(&targs->word_counts->lock);
-  count_words(targs->word_counts, infile);
-  // pthread_mutex_unlock(&targs->word_counts->lock);
-  fclose(infile);
   pthread_exit(NULL);
 }
 
@@ -67,26 +64,28 @@ int main(int argc, char *argv[]) {
     count_words(&word_counts, stdin);
   } else {
     /* TODO */
-    int rc;
     int nthreads = argc - 1;
     pthread_t threads[nthreads];
-    for(int t = 0; t < nthreads; t++) {
-      targs_t* targs = (targs_t *) malloc(sizeof(targs_t));
-      targs->filename = argv[t+1];
-      targs->word_counts = &word_counts;
-      rc = pthread_create(&threads[t], NULL, threadfun, (void *)targs);
+    int t;
+    int rc;
+    for (t=0; t!=nthreads; t++) {
+      targs_t *targs = (targs_t *)malloc(sizeof(targs_t));
+      targs->wclist = &word_counts;
+      targs->filepath = argv[t+1];
+      rc = pthread_create(&threads[t], NULL, threadWrapper, (void *)targs);
       if (rc) {
         printf("ERROR; return code from pthread_create() is %d\n", rc);
         exit(-1);
       }
     }
-    for(int t = 0; t < nthreads; t++) {
+    for (t=0; t!=nthreads; ++t) {
       pthread_join(threads[t], NULL);
     }
   }
+  pthread_mutex_destroy(&word_counts.lock);
 
   /* Output final result of all threads' work. */
   wordcount_sort(&word_counts, less_count);
   fprint_words(&word_counts, stdout);
-  pthread_exit(NULL);
+  return 0;
 }

@@ -32,22 +32,17 @@ void init_words(word_count_list_t *wclist) {
 }
 
 size_t len_words(word_count_list_t *wclist) {
-  size_t len = 0;
-  struct list_elem *e;
-  for (e = list_begin(wclist); e != list_end(wclist); e = list_next(e)) {
-    len++;
-  }
-  return len;
+  return list_size(wclist);
 }
 
 word_count_t *find_word(word_count_list_t *wclist, char *word) {
   /* Return count for word, if it exists. */
   struct list_elem *e;
   for (e = list_begin(wclist); e != list_end(wclist); e = list_next(e)) {
-    word_count_t *wc = list_entry(e, word_count_t, elem);
-    if (strcmp(word, wc->word) == 0) {
-      return wc;
-    }
+      word_count_t *wc = list_entry(e, word_count_t, elem);
+      if (!strcmp(wc->word, word)) {
+        return wc;
+      }
   }
   return NULL;
 }
@@ -60,11 +55,11 @@ word_count_t *add_word_with_count(word_count_list_t *wclist, char *word,
    */
   word_count_t *wc = find_word(wclist, word);
   if (wc != NULL) {
-    wc->count += count;
-  } else if ((wc = malloc(sizeof(word_count_t))) != NULL) {
+    wc->count++;
+  } else if ((wc = (word_count_t *)malloc(sizeof(word_count_t))) != NULL) {
     wc->word = word;
     wc->count = count;
-    list_push_front(wclist, &wc->elem);
+    list_push_back(wclist, &wc->elem);
   } else {
     perror("malloc");
   }
@@ -78,8 +73,8 @@ word_count_t *add_word(word_count_list_t *wclist, char *word) {
 void fprint_words(word_count_list_t *wclist, FILE *outfile) {
   struct list_elem *e;
   for (e = list_begin(wclist); e != list_end(wclist); e = list_next(e)) {
-    word_count_t *wc = list_entry(e, word_count_t, elem);
-    fprintf(outfile, "%8d\t%s\n", wc->count, wc->word);
+      word_count_t *wc = list_entry(e, word_count_t, elem);
+      fprintf(outfile, "word: %s\tcount: %8d.\n", wc->word, wc->count);
   }
 }
 

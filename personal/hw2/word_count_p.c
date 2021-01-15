@@ -33,24 +33,20 @@
 void init_words(word_count_list_t *wclist) {
   /* TODO */
   list_init(&wclist->lst);
+  pthread_mutex_init(&wclist->lock, NULL);
 }
 
 size_t len_words(word_count_list_t *wclist) {
   /* TODO */
-  size_t len = 0;
-  struct list_elem *e;
-  for (e = list_begin(&wclist->lst); e != list_end(&wclist->lst); e = list_next(e)) {
-    len++;
-  }
-  return len;
+  return list_size(&wclist->lst);
 }
 
 word_count_t *find_word(word_count_list_t *wclist, char *word) {
   /* TODO */
   struct list_elem *e;
-  for (e = list_begin(&wclist->lst); e != list_end(&wclist->lst); e = list_next(e)) {
+  for (e = list_begin (&wclist->lst); e != list_end (&wclist->lst); e = list_next (e)) {
     word_count_t *wc = list_entry(e, word_count_t, elem);
-    if (strcmp(word, wc->word) == 0) {
+    if (!strcmp(wc->word, word)) {
       return wc;
     }
   }
@@ -59,14 +55,14 @@ word_count_t *find_word(word_count_list_t *wclist, char *word) {
 
 word_count_t *add_word(word_count_list_t *wclist, char *word) {
   /* TODO */
-  pthread_mutex_lock(&wclist->lock);
   word_count_t *wc = find_word(wclist, word);
+  pthread_mutex_lock(&wclist->lock);
   if (wc != NULL) {
-    wc->count += 1;
-  } else if ((wc = malloc(sizeof(word_count_t))) != NULL) {
+    wc->count++;
+  } else if ((wc = (word_count_t *)malloc(sizeof(word_count_t))) != NULL) {
     wc->word = word;
     wc->count = 1;
-    list_push_front(&wclist->lst, &wc->elem);
+    list_push_back(&wclist->lst, &wc->elem);
   } else {
     perror("malloc");
   }
@@ -77,9 +73,9 @@ word_count_t *add_word(word_count_list_t *wclist, char *word) {
 void fprint_words(word_count_list_t *wclist, FILE *outfile) {
   /* TODO */
   struct list_elem *e;
-  for (e = list_begin(&wclist->lst); e != list_end(&wclist->lst); e = list_next(e)) {
+  for (e = list_begin (&wclist->lst); e != list_end (&wclist->lst); e = list_next (e)) {
     word_count_t *wc = list_entry(e, word_count_t, elem);
-    fprintf(outfile, "%8d\t%s\n", wc->count, wc->word);
+    fprintf(outfile, "word: %s\tcount: %8d\n", wc->word, wc->count);
   }
 }
 
