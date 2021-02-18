@@ -4,7 +4,42 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+#include "lib/kernel/stdio.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
+#include "process.h"
+#include "threads/synch.h"
+#include "threads/vaddr.h"
+#include "devices/shutdown.h"
+#include "string.h"
+#include "lib/user/stdlib.h"
+#include "lib/user/syscall.h"
+
+
 static void syscall_handler (struct intr_frame *);
+static void sys_exit(struct intr_frame *, uint32_t *);
+static void sys_practice(struct intr_frame *, uint32_t *);
+static void sys_exec(struct intr_frame *, uint32_t *);
+static void sys_wait(struct intr_frame *, uint32_t *);
+static void sys_create(struct intr_frame *, uint32_t *);
+static void sys_remove(struct intr_frame *, uint32_t *);
+static void sys_open(struct intr_frame *, uint32_t *);
+static void sys_close(struct intr_frame *, uint32_t *);
+static void sys_filesize(struct intr_frame *, uint32_t *);
+static void sys_read(struct intr_frame *, uint32_t *);
+static void sys_write(struct intr_frame *, uint32_t *);
+static void sys_seek(struct intr_frame *, uint32_t *);
+static void sys_tell(struct intr_frame *, uint32_t *);
+static void sys_halt();
+
+static void error(struct intr_frame *);
+static int get_user (const uint8_t *);
+static bool put_user (uint8_t *, uint8_t);
+static int get_user_byte(const uint8_t *, struct intr_frame *);
+static int get_user_ptr(const uint8_t *, struct intr_frame *);
+static void put_user_byte(uint8_t *, uint8_t, struct intr_frame *);
+static struct fnode *get_fn_from_fd (int);
+
 
 void
 syscall_init (void)
@@ -16,6 +51,7 @@ static void
 syscall_handler (struct intr_frame *f UNUSED)
 {
   uint32_t* args = ((uint32_t*) f->esp);
+  int cmd = get_user_byte((const uint8_t *)args, f);
 
   /*
    * The following print statement, if uncommented, will print out the syscall
@@ -24,12 +60,266 @@ syscall_handler (struct intr_frame *f UNUSED)
    * include it in your final submission.
    */
 
-  /* printf("System call number: %d\n", args[0]); */
+  // printf("System call number: %d\n", args[0]);
 
-  if (args[0] == SYS_EXIT)
-    {
-      f->eax = args[1];
-      printf ("%s: exit(%d)\n", &thread_current ()->name, args[1]);
-      thread_exit ();
+  switch (cmd)
+  {
+  case SYS_EXIT:
+    sys_exit(f, args);
+    break;
+  case SYS_EXEC:
+    sys_exec(f, args);
+    break;
+  case SYS_WAIT:
+    sys_wait(f, args);
+    break;
+  case SYS_PRACTICE:
+    sys_practice(f, args);
+    break;
+  case SYS_CREATE:
+    sys_create(f, args);
+    break;
+  case SYS_REMOVE:
+    sys_remove(f, args);
+    break;
+  case SYS_OPEN:
+    sys_open(f, args);
+    break;
+  case SYS_CLOSE:
+    sys_close(f, args);
+    break;
+  case SYS_READ:
+    sys_read(f, args);
+    break;
+  case SYS_WRITE:
+    sys_write(f, args);
+    break;
+  case SYS_SEEK:
+    sys_seek(f, args);
+    break;
+  case SYS_TELL:
+    sys_tell(f, args);
+    break;
+  case SYS_HALT:
+    sys_halt();
+    break;
+  
+  default:
+    error(f);
+  }
+}
+
+
+void sys_halt() {
+  shutdown_power_off();
+}
+
+void sys_create(struct intr_frame *f UNUSED, uint32_t* args) {
+  const char *filename = get_user_ptr((const uint8_t *)(args+1), f);
+  unsigned initial_size = get_user_byte((const uint8_t *)(args+2), f);
+  f->eax = filesys_create(filename, initial_size);
+}
+
+void sys_remove(struct intr_frame *f UNUSED, uint32_t* args) {
+  const char *filename = get_user_ptr((const uint8_t *)(args+1), f);
+  f->eax = filesys_remove(filename);
+}
+
+void sys_open(struct intr_frame *f UNUSED, uint32_t* args) {
+  const char *filename = get_user_ptr((const uint8_t *)(args+1), f);
+  struct file *fp = filesys_open(filename);
+
+  // Add opened file to file_list of current thread
+  struct list *list_f = &thread_current()->file_list;
+  struct fnode *fn;
+  fn = (struct fnode *)malloc(sizeof(struct fnode));
+  fn->fd = thread_current()->next_fd++;
+  fn->file_ptr = fp;
+  fn->file_name = filename;
+  fn->file_lock = (struct lock *)malloc(sizeof(struct lock));
+  lock_init(fn->file_lock);
+  list_push_back(list_f, &fn->elem);
+  f->eax = fn->fd;
+}
+
+void sys_close(struct intr_frame *f UNUSED, uint32_t* args) {
+  int fd = get_user_byte((const uint8_t *)(args+1), f);
+
+  // Remove file from file_list of current thread
+  struct list *list_f = &thread_current()->file_list;
+  struct list_elem *e = list_begin(list_f);
+  for (; e != list_end(list_f); e = list_next(e)) {
+    struct fnode *fn = list_entry(e, struct fnode, elem);
+    if (fn->fd == fd) {
+      file_close(fn->file_ptr);
+      list_remove(e);
+      free(fn->file_lock);
+      free(fn);
+      return; // Must return here since e has no next list_elem after list_remove
     }
+  }
+}
+
+
+void sys_filesize(struct intr_frame *f UNUSED, uint32_t* args) {
+  int fd = get_user_byte((const uint8_t *)(args+1), f);
+  struct fnode *fn = get_fn_from_fd(fd);
+  struct file *fp = fn->file_ptr;
+  f->eax = file_length(fp);
+}
+
+
+void sys_read(struct intr_frame *f UNUSED, uint32_t* args) {
+  int fd = get_user_byte((const uint8_t *)(args+1), f);
+  void *buffer = get_user_ptr((const uint8_t *)(args+2), f);
+  unsigned size = get_user_byte((const uint8_t *)(args+3), f);
+
+  if (fd == 0) {
+    f->eax = input_getc();
+  } else if (fd < 0 || fd == 1) {
+    error(f);
+  } else {
+    struct fnode *fn = get_fn_from_fd(fd);
+    struct file *fp = fn->file_ptr;
+    f->eax = file_read(fp, buffer, size);
+  }
+}
+
+
+void sys_write(struct intr_frame *f UNUSED, uint32_t* args) {
+  int fd = get_user_byte((const uint8_t *)(args+1), f);
+  const void *buffer = get_user_ptr((const uint8_t *)(args+2), f);
+  unsigned size = get_user_byte((const uint8_t *)(args+3), f);
+
+  if (fd == 1) {  // stdout
+    putbuf(buffer, size);
+    f->eax = size;
+  } else if (fd <=0) {  // stdin and stderr
+    error(f);
+  } else {
+    struct fnode *fn = get_fn_from_fd(fd);
+    struct file *fp = fn->file_ptr;
+    lock_acquire(fn->file_lock);
+    f->eax = file_write(fp, buffer, size);
+    lock_release(fn->file_lock);
+  }
+}
+
+
+void sys_seek(struct intr_frame *f UNUSED, uint32_t* args) {
+  int fd = get_user_byte((const uint8_t *)(args+1), f);
+  unsigned position = get_user_byte((const uint8_t *)(args+2), f);
+  struct fnode *fn = get_fn_from_fd(fd);
+  struct file *fp = fn->file_ptr;
+  lock_acquire(fn->file_lock);
+  file_seek(fp, position);
+  lock_release(fn->file_lock);
+}
+
+
+void sys_tell(struct intr_frame *f UNUSED, uint32_t* args) {
+  int fd = get_user_byte((const uint8_t *)(args+1), f);
+  struct file *fp = get_fn_from_fd(fd)->file_ptr;
+  f->eax = file_tell(fp);
+}
+
+
+void sys_exit(struct intr_frame *f UNUSED, uint32_t* args) {
+  f->eax = get_user_byte((const uint8_t *)(args+1), f);
+  thread_current()->pn->exit_status = f->eax;
+  printf ("%s: exit(%d)\n", &thread_current()->name, f->eax);
+  thread_exit ();
+}
+
+void sys_practice(struct intr_frame *f UNUSED, uint32_t* args) {
+  f->eax = get_user_byte((const uint8_t *)(args+1), f) + 1;
+}
+
+void sys_exec(struct intr_frame *f UNUSED, uint32_t* args) {
+  const char *filename = get_user_ptr((const uint8_t *)(args+1), f);
+  f->eax = process_execute(filename);
+}
+
+
+void sys_wait(struct intr_frame *f UNUSED, uint32_t* args) {
+  pid_t pid = get_user_byte((const uint8_t *)(args+1), f);
+  f->eax = process_wait(pid);
+}
+
+
+int pow16(int n) {
+  int r = 1;
+  while (n--) {
+    r *= 16;
+  }
+  return r;
+}
+
+int get_user_ptr(const uint8_t *uaddr, struct intr_frame *f) {
+  size_t idx = 0;
+  int ptr = 0; 
+  for (; idx != 4; ++idx) {
+    ptr += get_user_byte(uaddr+idx, f) * pow16(idx*2);
+  }
+  return ptr;
+}
+
+int get_user_byte(const uint8_t *uaddr, struct intr_frame *f) {
+  if (is_kernel_vaddr(uaddr)) {
+    error(f);
+  }
+  int result = get_user(uaddr);
+  if (result == -1) {
+    error(f);
+  }
+  return result;
+}
+
+void put_user_byte(uint8_t *udst, uint8_t byte, struct intr_frame *f) {
+  if (is_kernel_vaddr(udst) || !put_user(udst, byte)) {
+    error(f);
+  }
+}
+
+
+/* Reads a byte at user virtual address UADDR.
+UADDR must be below PHYS_BASE.
+Returns the byte value if successful, -1 if a segfault
+occurred. */
+int get_user (const uint8_t *uaddr)
+{
+  int result;
+  asm ("movl $1f, %0; movzbl %1, %0; 1:"
+  : "=&a" (result) : "m" (*uaddr));
+  return result;
+}
+/* Writes BYTE to user address UDST.
+UDST must be below PHYS_BASE.
+Returns true if successful, false if a segfault occurred. */
+bool put_user (uint8_t *udst, uint8_t byte)
+{
+  int error_code;
+  asm ("movl $1f, %0; movb %b2, %1; 1:"
+  : "=&a" (error_code), "=m" (*udst) : "q" (byte));
+  return error_code != -1;
+}
+
+
+struct fnode *get_fn_from_fd(int fd) {
+  struct list *list_f = &thread_current()->file_list;
+  struct list_elem *e = list_begin(list_f);
+  for (; e != list_end(list_f); e = list_next(e)) {
+    struct fnode *fn = list_entry(e, struct fnode, elem);
+    if (fn->fd == fd)
+      return fn;
+  }
+  return NULL;
+}
+
+
+void error(struct intr_frame *f) {
+  f->eax = -1;
+  thread_current()->pn->exit_status = f->eax;
+  printf ("%s: exit(%d)\n", &thread_current()->name, f->eax);
+  thread_exit();
 }

@@ -19,9 +19,52 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-static struct semaphore temporary;
 static thread_func start_process NO_RETURN;
 static bool load(const char* cmdline, void (**eip)(void), void** esp);
+
+
+static struct pnode *find_child_pnode(pid_t pid) {
+  struct list *list_c = &thread_current()->child_list;
+  struct pnode *pn;
+  struct list_elem *e;
+  for (e = list_begin(list_c); e != list_end(list_c); e = list_next(e)) {
+    pn = list_entry(e, struct pnode, elem);
+    if (pn->pid == pid) {
+      return pn;
+    }
+  }
+  return NULL;
+}
+
+void free_child_list(void) {
+  struct list *list_c = &thread_current()->child_list;
+  struct list_elem *e;
+  struct pnode *pn;
+  while (!list_empty(list_c)) {
+    e = list_pop_front(list_c);
+    pn = list_entry(e, struct pnode, elem);
+    free(pn);
+  }
+}
+
+void free_file_list(void) {
+  struct list *list_f = &thread_current()->file_list;
+  struct list_elem *e;
+  struct fnode *fn;
+  while (!list_empty(list_f)) {
+    e = list_pop_front(list_f);
+    fn = list_entry(e, struct fnode, elem);
+    if (lock_held_by_current_thread(fn->file_lock)) {
+      lock_release(fn->file_lock);
+    }
+    file_close(fn->file_ptr);
+    free(fn->file_lock);
+    free(fn);
+  }
+}
+
+
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -31,7 +74,6 @@ tid_t process_execute(const char* file_name) {
   char* fn_copy;
   tid_t tid;
 
-  sema_init(&temporary, 0);
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page(0);
@@ -99,7 +141,6 @@ static void start_process(void* file_name_) {
   if_.esp -= 4;
   memset(if_.esp, 0, sizeof(int));
 
-
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -120,8 +161,15 @@ static void start_process(void* file_name_) {
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int process_wait(tid_t child_tid UNUSED) {
-  sema_down(&temporary);
-  return 0;
+  struct pnode *pn = find_child_pnode(child_tid);
+  int status = -1;
+  if (pn != NULL) {
+    sema_down(&pn->sema);
+    status = pn->exit_status;
+    list_remove(&pn->elem);
+    free(pn);
+  }
+  return status;
 }
 
 /* Free the current process's resources. */
@@ -144,7 +192,13 @@ void process_exit(void) {
     pagedir_activate(NULL);
     pagedir_destroy(pd);
   }
-  sema_up(&temporary);
+
+  // /* Free all list. */
+  free_child_list();
+  free_file_list();
+  
+  // /* Semaphore of process V. */
+  sema_up(&cur->pn->sema);
 }
 
 /* Sets up the CPU for running user code in the current

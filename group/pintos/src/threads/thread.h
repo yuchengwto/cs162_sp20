@@ -98,6 +98,12 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct pnode *pn;
+    struct list child_list;
+
+    /* Owned by userprog/syscall.c. */
+    struct list file_list;              /* Basically a file table. */
+    int next_fd;                        /* Next available file descriptor. */
 #endif
 
     /* Owned by thread.c. */

@@ -183,6 +183,16 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+  /* Create pnode. */
+#ifdef USERPROG
+  struct pnode *pn = malloc(sizeof(struct pnode));
+  pn->pid = tid;
+  pn->exit_status = -1;
+  sema_init(&pn->sema, 0);
+  list_push_back(&running_thread()->child_list, &pn->elem);
+  t->pn = pn;
+#endif
+
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -446,6 +456,17 @@ is_thread (struct thread *t)
   return t != NULL && t->magic == THREAD_MAGIC;
 }
 
+size_t namelen(const char *name) {
+  size_t idx;
+  for (idx = 0; idx < strlen(name) + 1; idx++) {
+    if (name[idx] == '\0' || name[idx] == ' ') {
+      break;
+    }
+  }
+  return idx;
+}
+
+
 /* Does basic initialization of T as a blocked thread named
    NAME. */
 static void
@@ -459,10 +480,16 @@ init_thread (struct thread *t, const char *name, int priority)
 
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
-  strlcpy (t->name, name, sizeof t->name);
+  strlcpy (t->name, name, namelen(name) + 1);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+#ifdef USERPROG
+  list_init(&t->child_list);
+  list_init(&t->file_list);
+  t->next_fd = 2;
+#endif
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
