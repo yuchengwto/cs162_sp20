@@ -36,7 +36,7 @@ static void error(struct intr_frame *);
 static int get_user (const uint8_t *);
 static bool put_user (uint8_t *, uint8_t);
 static int get_user_byte(const uint8_t *, struct intr_frame *);
-static int get_user_ptr(const uint8_t *, struct intr_frame *);
+static void *get_user_ptr(const uint8_t *, struct intr_frame *);
 static void put_user_byte(uint8_t *, uint8_t, struct intr_frame *);
 static struct fnode *get_fn_from_fd (int);
 
@@ -88,6 +88,9 @@ syscall_handler (struct intr_frame *f UNUSED)
   case SYS_CLOSE:
     sys_close(f, args);
     break;
+  case SYS_FILESIZE:
+    sys_filesize(f, args);
+    break;
   case SYS_READ:
     sys_read(f, args);
     break;
@@ -128,6 +131,10 @@ void sys_remove(struct intr_frame *f UNUSED, uint32_t* args) {
 void sys_open(struct intr_frame *f UNUSED, uint32_t* args) {
   const char *filename = get_user_ptr((const uint8_t *)(args+1), f);
   struct file *fp = filesys_open(filename);
+  if (fp == NULL) {
+    f->eax = -1;
+    return;
+  }
 
   // Add opened file to file_list of current thread
   struct list *list_f = &thread_current()->file_list;
@@ -164,6 +171,9 @@ void sys_close(struct intr_frame *f UNUSED, uint32_t* args) {
 void sys_filesize(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   struct fnode *fn = get_fn_from_fd(fd);
+  if (fn == NULL) {
+    error(f);
+  }
   struct file *fp = fn->file_ptr;
   f->eax = file_length(fp);
 }
@@ -180,6 +190,9 @@ void sys_read(struct intr_frame *f UNUSED, uint32_t* args) {
     error(f);
   } else {
     struct fnode *fn = get_fn_from_fd(fd);
+    if (fn == NULL) {
+      error(f);
+    }
     struct file *fp = fn->file_ptr;
     f->eax = file_read(fp, buffer, size);
   }
@@ -189,7 +202,7 @@ void sys_read(struct intr_frame *f UNUSED, uint32_t* args) {
 void sys_write(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   const void *buffer = get_user_ptr((const uint8_t *)(args+2), f);
-  unsigned size = get_user_byte((const uint8_t *)(args+3), f);
+  int size = get_user_int((const uint8_t *)(args+3), f);
 
   if (fd == 1) {  // stdout
     putbuf(buffer, size);
@@ -198,6 +211,9 @@ void sys_write(struct intr_frame *f UNUSED, uint32_t* args) {
     error(f);
   } else {
     struct fnode *fn = get_fn_from_fd(fd);
+    if (fn == NULL) {
+      error(f);
+    }
     struct file *fp = fn->file_ptr;
     lock_acquire(fn->file_lock);
     f->eax = file_write(fp, buffer, size);
@@ -210,6 +226,9 @@ void sys_seek(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   unsigned position = get_user_byte((const uint8_t *)(args+2), f);
   struct fnode *fn = get_fn_from_fd(fd);
+  if (fn == NULL) {
+    error(f);
+  }
   struct file *fp = fn->file_ptr;
   lock_acquire(fn->file_lock);
   file_seek(fp, position);
@@ -219,7 +238,11 @@ void sys_seek(struct intr_frame *f UNUSED, uint32_t* args) {
 
 void sys_tell(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
-  struct file *fp = get_fn_from_fd(fd)->file_ptr;
+  struct fnode *fn = get_fn_from_fd(fd);
+  if (fn == NULL) {
+    error(f);
+  }
+  struct file *fp = fn->file_ptr;
   f->eax = file_tell(fp);
 }
 
@@ -237,6 +260,19 @@ void sys_practice(struct intr_frame *f UNUSED, uint32_t* args) {
 
 void sys_exec(struct intr_frame *f UNUSED, uint32_t* args) {
   const char *filename = get_user_ptr((const uint8_t *)(args+1), f);
+  // Check the filename string is valid or not
+  int idx = 0;
+  while (get_user_byte((const uint8_t *)(filename+idx++), f) != '\0') {}
+
+  size_t filenameLen = strcspn(filename, " ") + 1;
+  char tmp[filenameLen];
+  strlcpy(tmp, filename, filenameLen);
+  struct file *fp = filesys_open(tmp);
+  if (fp == NULL) {
+    f->eax = -1;
+    return;
+  }
+  file_close(fp);
   f->eax = process_execute(filename);
 }
 
@@ -255,13 +291,27 @@ int pow16(int n) {
   return r;
 }
 
-int get_user_ptr(const uint8_t *uaddr, struct intr_frame *f) {
+void *get_user_ptr(const uint8_t *uaddr, struct intr_frame *f) {
   size_t idx = 0;
   int ptr = 0; 
   for (; idx != 4; ++idx) {
     ptr += get_user_byte(uaddr+idx, f) * pow16(idx*2);
   }
+  if (ptr == NULL) {
+    error(f);
+  }
+  // Check the get pointer is valid or not
+  get_user_byte((const uint8_t *) ptr, f);
   return ptr;
+}
+
+int get_user_int(const uint8_t *uaddr, struct intr_frame *f) {
+  size_t idx = 0;
+  int res = 0; 
+  for (; idx != 4; ++idx) {
+    res += get_user_byte(uaddr+idx, f) * pow16(idx*2);
+  }
+  return res;
 }
 
 int get_user_byte(const uint8_t *uaddr, struct intr_frame *f) {
