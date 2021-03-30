@@ -36,14 +36,29 @@ int server_proxy_port;
  * It is the caller's reponsibility to ensure that the file stored at `path` exists.
  */
 void serve_file(int fd, char *path) {
+  struct stat buf;
+  stat(path, &buf);
+  char filesize[20];
+  sprintf(filesize, "%ld", buf.st_size);
 
   http_start_response(fd, 200);
   http_send_header(fd, "Content-Type", http_get_mime_type(path));
-  http_send_header(fd, "Content-Length", "0"); // Change this too
+  http_send_header(fd, "Content-Length", filesize); // Change this too
   http_end_headers(fd);
 
   /* TODO: PART 2 */
-
+  FILE *fp = fopen(path, "r");
+  char buffer[1024];
+  size_t nread;
+  size_t nwrite;
+  size_t fdwrite;
+  while ((nread = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+    nwrite = 0;
+    while (fdwrite = write(fd, buffer + nwrite, nread - nwrite) > 0) {
+      nwrite += fdwrite;
+    }
+  }
+  fclose(path);
 }
 
 void serve_directory(int fd, char *path) {
@@ -52,7 +67,31 @@ void serve_directory(int fd, char *path) {
   http_end_headers(fd);
 
   /* TODO: PART 3 */
-
+  DIR *dp = opendir(path);
+  struct dirent *entry;
+  char filelist[10240];
+  char filepath[1024];
+  while (entry = readdir(dp))
+  {
+    if (entry->d_type == 8) {
+      if (strcmp(entry->d_name, "index.html") == 0) {
+        sprintf(filepath, "%s/index.html", path);
+        serve_file(fd, filepath);
+        closedir(path);
+        return;
+      } else {
+        sprintf(filepath, "%s/%s", path, entry->d_name);
+        sprintf(filelist, "%s\n%s", filelist, filepath);
+      }
+    }
+  }
+  size_t listlen = strlen(filelist);
+  size_t nwrite = 0;
+  size_t fdwrite;
+  while (fdwrite = write(fd, filelist + nwrite, listlen - nwrite) > 0) {
+    nwrite += fdwrite;
+  }
+  closedir(path);
 }
 
 
@@ -104,6 +143,19 @@ void handle_files_request(int fd) {
    * determine when to call serve_file() or serve_directory() depending
    * on `path`. Make your edits below here in this function.
    */
+  struct stat buf;
+  if (stat(path, &buf) == 0) {
+    if (S_ISREG(buf.st_mode)) {
+      serve_file(fd, path);
+    } else if (S_ISDIR(buf.st_mode))
+    {
+      serve_directory(fd, path);
+    }
+  } else {
+    http_start_response(fd, 404);
+    http_send_header(fd, "Content-Type", "text/html");
+    http_end_headers(fd);
+  }
 
   close(fd);
   return;
@@ -241,7 +293,8 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
    * An appropriate size of the backlog is 1024, though you may
    * play around with this value during performance testing.
    */
-
+  bind(socket_number, &server_address, sizeof(server_address));
+  listen(socket_number, 1024);
 
   /* PART 1 END */
   printf("Listening on port %d...\n", server_port);
