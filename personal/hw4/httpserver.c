@@ -69,7 +69,7 @@ void serve_directory(int fd, char *path) {
   /* TODO: PART 3 */
   DIR *dp = opendir(path);
   struct dirent *entry;
-  char filelist[10240];
+  char filelist[10240]; // for simplicity, assume filelist buffer is bit enough.
   char filepath[1024];
   while (entry = readdir(dp))
   {
@@ -92,6 +92,14 @@ void serve_directory(int fd, char *path) {
     nwrite += fdwrite;
   }
   closedir(path);
+}
+
+size_t stream_request(char *stream, struct http_request *request) {
+  size_t size = sprintf(stream, 
+                        "%s %s HTTP/1.0\r\n"
+                        "\r\n"
+                        , request->method, request->path);
+  return size;
 }
 
 
@@ -224,7 +232,34 @@ void handle_proxy_request(int fd) {
   }
 
   /* TODO: PART 4 */
+  struct http_request *request = http_request_parse(fd);
+  size_t requestlen = strlen(request->method) + strlen(request->path) + 1024; // 1024 for some redundant 0x0 bytes, also as a null termination.
+  char requestline[requestlen];
+  requestlen = stream_request(requestline, request);  // formatted string line length.
+  
+  size_t nwrite;
+  size_t requestleft = requestlen + 1;// plus one for a null termination '\0'
+  while (nwrite = write(target_fd, requestline, requestleft) > 0) {
+    requestleft -= nwrite;
+  }
 
+  // wait response from target server and redirect to client.
+  char buffer[4096];
+  size_t nread;
+  size_t nwriteleft;
+  while (nread = read(target_fd, buffer, sizeof(buffer)) > 0)
+  {
+    nwriteleft = nread;
+    while (nwrite = write(fd, buffer, nwriteleft) > 0)
+    {
+      nwriteleft -= nwrite;
+    }
+    memset(buffer, 0x0, sizeof(buffer));
+  }
+  write(fd, buffer, 1); // write one 0x0 at final as a null termination
+
+  close(target_fd);
+  close(fd);
 }
 
 #ifdef POOLSERVER
@@ -241,7 +276,19 @@ void *handle_clients(void *void_request_handler) {
   pthread_detach(pthread_self());
 
   /* TODO: PART 7 */
+  while (1) {
+    pthread_mutex_lock(&work_queue.mutex);
 
+    while (work_queue.size == 0) {
+      pthread_cond_wait(&work_queue.condvar, &work_queue.mutex);
+    }
+    wq_item_t *work = work_queue.head;
+    wq_init.pop(&work_queue);
+
+    request_handler(work->client_socket_fd);
+
+    pthread_mutex_unlock(&work_queue.mutex);
+  }
 }
 
 /* 
@@ -250,6 +297,19 @@ void *handle_clients(void *void_request_handler) {
 void init_thread_pool(int num_threads, void (*request_handler)(int)) {
 
   /* TODO: PART 7 */
+  wq_init(&work_queue);
+  pthread_mutex_init(&work_queue.mutex, NULL);
+  pthread_cond_init(&work_queue.condvar, NULL);
+  pthread_t *tids = malloc(sizeof(pthread_t) * num_threads);
+
+  for (size_t i=0; i!=num_threads; ++i) {
+    int err = pthread_create(&tids[i], NULL,
+                            handle_clients, (void *)request_handler);
+    if (err != 0) {
+      printf("pthread create: %s\n", strerror(err));
+      pthread_exit(NULL);
+    }
+  }
 
 }
 #endif
@@ -341,6 +401,16 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
      * process should continue listening and accepting
      * connections.
      */
+    pid_t handler_process = fork();
+    if (handler_process == 0) {
+      // subprocess
+      close(*socket_number);
+      request_handler(client_socket_number);
+      close(client_socket_number);
+      exit(EXIT_SUCCESS);
+    } else {
+      close(client_socket_number);
+    }
 
     /* PART 5 END */
 #elif THREADSERVER
@@ -353,6 +423,14 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
      * listening and accepting connections. The main
      * thread will NOT be joining with the new thread.
      */
+    pthread_t *handler_thread = malloc(sizeof(pthread_t));
+    int err = pthread_create(handler_thread, NULL,
+                            request_handler, client_socket_number);
+    if (err != 0) {
+      printf("pthread create: %s\n", strerror(err));
+      pthread_exit(NULL);
+    }
+    pthread_detach(handler_thread);
 
     /* PART 6 END */
 #elif POOLSERVER
@@ -363,7 +441,10 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
      * client's socket number to the work queue. A thread
      * in the thread pool will send a response to the client.
      */
-
+    pthread_mutex_lock(&work_queue.mutex);
+    wq_push(&work_queue, client_socket_number);
+    pthread_cond_signal(&work_queue.condvar);
+    pthread_mutex_unlock(&work_queue.mutex);
     /* PART 7 END */
 #endif
   }
