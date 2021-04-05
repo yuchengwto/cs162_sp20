@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
@@ -30,6 +31,10 @@ int server_port;  // Default value: 8000
 char *server_files_directory;
 char *server_proxy_hostname;
 int server_proxy_port;
+int server_fd;
+pthread_t *tids;
+
+
 
 /*
  * Serves the contents the file stored at `path` to the client socket `fd`.
@@ -54,11 +59,11 @@ void serve_file(int fd, char *path) {
   size_t fdwrite;
   while ((nread = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
     nwrite = 0;
-    while (fdwrite = write(fd, buffer + nwrite, nread - nwrite) > 0) {
+    while ((fdwrite = write(fd, buffer + nwrite, nread - nwrite)) > 0) {
       nwrite += fdwrite;
     }
   }
-  fclose(path);
+  fclose(fp);
 }
 
 void serve_directory(int fd, char *path) {
@@ -71,27 +76,29 @@ void serve_directory(int fd, char *path) {
   struct dirent *entry;
   char filelist[10240]; // for simplicity, assume filelist buffer is bit enough.
   char filepath[1024];
-  while (entry = readdir(dp))
+  memset(filelist, 0, sizeof(filelist));
+  memset(filepath, 0, sizeof(filepath));
+  while ((entry = readdir(dp)))
   {
     if (entry->d_type == 8) {
       if (strcmp(entry->d_name, "index.html") == 0) {
-        sprintf(filepath, "%s/index.html", path);
+        sprintf(filepath, "%sindex.html", path);
         serve_file(fd, filepath);
-        closedir(path);
+        closedir(dp);
         return;
       } else {
-        sprintf(filepath, "%s/%s", path, entry->d_name);
-        sprintf(filelist, "%s\n%s", filelist, filepath);
+        sprintf(filepath, "<a href=\"http://192.168.162.162:8000%s%s\">%s</a><br>", path+2, entry->d_name, entry->d_name);
+        sprintf(filelist, "%s%s", filelist, filepath);
       }
     }
   }
+  closedir(dp);
   size_t listlen = strlen(filelist);
   size_t nwrite = 0;
   size_t fdwrite;
-  while (fdwrite = write(fd, filelist + nwrite, listlen - nwrite) > 0) {
+  while ((fdwrite = write(fd, filelist + nwrite, listlen - nwrite)) > 0) {
     nwrite += fdwrite;
   }
-  closedir(path);
 }
 
 size_t stream_request(char *stream, struct http_request *request) {
@@ -100,6 +107,27 @@ size_t stream_request(char *stream, struct http_request *request) {
                         "\r\n"
                         , request->method, request->path);
   return size;
+}
+
+struct request_handler_args {
+  pthread_t *pid;
+  void (*func)(int);
+  int client_fd;
+};
+
+
+void *request_handler_wrapper(void *args) {
+  pthread_detach(pthread_self());
+  struct request_handler_args *args_ = (struct request_handler_args *) args;
+  void (*request_handler)(int) = args_->func;
+  pthread_t *pid = args_->pid;
+  int client_fd = args_->client_fd;
+  request_handler(client_fd);
+
+  // Free malloc memory
+  free(pid);
+  free(args_);
+  pthread_exit(0);
 }
 
 
@@ -165,6 +193,7 @@ void handle_files_request(int fd) {
     http_end_headers(fd);
   }
 
+  free(path);
   close(fd);
   return;
 }
@@ -239,7 +268,7 @@ void handle_proxy_request(int fd) {
   
   size_t nwrite;
   size_t requestleft = requestlen + 1;// plus one for a null termination '\0'
-  while (nwrite = write(target_fd, requestline, requestleft) > 0) {
+  while ((nwrite = write(target_fd, requestline, requestleft)) > 0) {
     requestleft -= nwrite;
   }
 
@@ -247,10 +276,10 @@ void handle_proxy_request(int fd) {
   char buffer[4096];
   size_t nread;
   size_t nwriteleft;
-  while (nread = read(target_fd, buffer, sizeof(buffer)) > 0)
+  while ((nread = read(target_fd, buffer, sizeof(buffer))) > 0)
   {
     nwriteleft = nread;
-    while (nwrite = write(fd, buffer, nwriteleft) > 0)
+    while ((nwrite = write(fd, buffer, nwriteleft)) > 0)
     {
       nwriteleft -= nwrite;
     }
@@ -276,19 +305,23 @@ void *handle_clients(void *void_request_handler) {
   pthread_detach(pthread_self());
 
   /* TODO: PART 7 */
+  struct tcp_info info;
+  int len = sizeof(info);
   while (1) {
-    pthread_mutex_lock(&work_queue.mutex);
-
-    while (work_queue.size == 0) {
-      pthread_cond_wait(&work_queue.condvar, &work_queue.mutex);
+    getsockopt(server_fd, IPPROTO_TCP, TCP_INFO, &info, (socklen_t *) &len);
+    if (info.tcpi_state == TCP_CLOSE) {
+      break;
     }
-    wq_item_t *work = work_queue.head;
-    wq_init.pop(&work_queue);
-
-    request_handler(work->client_socket_fd);
-
-    pthread_mutex_unlock(&work_queue.mutex);
+    // pthread_mutex_lock(&work_queue.mutex);
+    // while (work_queue.size == 0) {
+    //   pthread_cond_wait(&work_queue.condvar, &work_queue.mutex);
+    // }
+    // wq_item_t *work = work_queue.head;
+    int client_fd = wq_pop(&work_queue);
+    request_handler(client_fd);
+    // pthread_mutex_unlock(&work_queue.mutex);
   }
+  pthread_exit(NULL);
 }
 
 /* 
@@ -298,10 +331,7 @@ void init_thread_pool(int num_threads, void (*request_handler)(int)) {
 
   /* TODO: PART 7 */
   wq_init(&work_queue);
-  pthread_mutex_init(&work_queue.mutex, NULL);
-  pthread_cond_init(&work_queue.condvar, NULL);
-  pthread_t *tids = malloc(sizeof(pthread_t) * num_threads);
-
+  tids = malloc(sizeof(pthread_t) * num_threads);
   for (size_t i=0; i!=num_threads; ++i) {
     int err = pthread_create(&tids[i], NULL,
                             handle_clients, (void *)request_handler);
@@ -310,7 +340,6 @@ void init_thread_pool(int num_threads, void (*request_handler)(int)) {
       pthread_exit(NULL);
     }
   }
-
 }
 #endif
 
@@ -353,8 +382,8 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
    * An appropriate size of the backlog is 1024, though you may
    * play around with this value during performance testing.
    */
-  bind(socket_number, &server_address, sizeof(server_address));
-  listen(socket_number, 1024);
+  bind(*socket_number, (struct sockaddr *)&server_address, sizeof(server_address));
+  listen(*socket_number, 1024);
 
   /* PART 1 END */
   printf("Listening on port %d...\n", server_port);
@@ -424,13 +453,16 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
      * thread will NOT be joining with the new thread.
      */
     pthread_t *handler_thread = malloc(sizeof(pthread_t));
+    struct request_handler_args *args = malloc(sizeof(struct request_handler_args));
+    args->func = request_handler;
+    args->client_fd = client_socket_number;
+    args->pid = handler_thread;
     int err = pthread_create(handler_thread, NULL,
-                            request_handler, client_socket_number);
+                            request_handler_wrapper, (void *)args);
     if (err != 0) {
       printf("pthread create: %s\n", strerror(err));
       pthread_exit(NULL);
     }
-    pthread_detach(handler_thread);
 
     /* PART 6 END */
 #elif POOLSERVER
@@ -441,19 +473,21 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
      * client's socket number to the work queue. A thread
      * in the thread pool will send a response to the client.
      */
-    pthread_mutex_lock(&work_queue.mutex);
+    // pthread_mutex_lock(&work_queue.mutex);
     wq_push(&work_queue, client_socket_number);
     pthread_cond_signal(&work_queue.condvar);
-    pthread_mutex_unlock(&work_queue.mutex);
+    // pthread_mutex_unlock(&work_queue.mutex);
     /* PART 7 END */
 #endif
   }
+
+  // Free malloc memory
+  free(tids);
 
   shutdown(*socket_number, SHUT_RDWR);
   close(*socket_number);
 }
 
-int server_fd;
 void signal_callback_handler(int signum) {
   printf("Caught signal %d: %s\n", signum, strsignal(signum));
   printf("Closing socket %d\n", server_fd);
