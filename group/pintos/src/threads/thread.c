@@ -24,6 +24,10 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/* List of processes in THREAD_SLEEP state, that is, processes
+   that are sleeping and waiting for wakeup. */
+static struct list sleep_list;
+
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
@@ -70,6 +74,11 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+static bool sleep_aux(const struct thread *left, const struct thread *right);
+static bool less_sleep(const struct list_elem *left, const struct list_elem *right, void *aux);
+static bool lock_priority_aux(const struct lock *left, const struct lock *right);
+static bool less_lock_priority(const struct list_elem *left, const struct list_elem *right, void *aux);
+
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -91,6 +100,7 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
+  list_init (&sleep_list);
   list_init (&all_list);
 
   /* Set up a thread structure for the running thread. */
@@ -210,6 +220,9 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
+
+  /* Defensively yield to CPU. */
+  thread_yield();
 
   return tid;
 }
@@ -344,15 +357,25 @@ thread_foreach (thread_action_func *func, void *aux)
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority)
-{
-  thread_current ()->priority = new_priority;
+{  
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
+  struct thread *t = thread_current();
+  t->instrinsic_priority = new_priority;
+  adjust_priority(t);
+
+  intr_set_level (old_level);
+
+  // Defensively yield processor
+  thread_yield();
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void)
 {
-  return thread_current ()->priority;
+  return thread_current()->priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -456,10 +479,10 @@ is_thread (struct thread *t)
   return t != NULL && t->magic == THREAD_MAGIC;
 }
 
-size_t namelen(const char *name) {
+static size_t nameLen(const char *name) {
   size_t idx;
   for (idx = 0; idx < strlen(name) + 1; idx++) {
-    if (name[idx] == '\0' || name[idx] == ' ') {
+    if (name[idx] == '\0') {
       break;
     }
   }
@@ -480,10 +503,15 @@ init_thread (struct thread *t, const char *name, int priority)
 
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
-  strlcpy (t->name, name, namelen(name) + 1);
+  strlcpy (t->name, name, nameLen(name) + 1);
   t->stack = (uint8_t *) t + PGSIZE;
+  t->instrinsic_priority = priority;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+  /* Init holding locks list. */
+  list_init(&t->lock_list);
+  t->waiting_lock = NULL;
 
 #ifdef USERPROG
   list_init(&t->child_list);
@@ -519,8 +547,12 @@ next_thread_to_run (void)
 {
   if (list_empty (&ready_list))
     return idle_thread;
-  else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  else {
+    struct list_elem *max_priority_elem = list_max(&ready_list, &less_thread_priority, &thread_priority_aux);
+    struct thread *t = list_entry (max_priority_elem, struct thread, elem);
+    list_remove(max_priority_elem);
+    return t;
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -609,3 +641,110 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
+
+
+static bool sleep_aux(const struct thread *left, const struct thread *right) {
+  return left->wakeup_time < right->wakeup_time;
+}
+
+static bool less_sleep(const struct list_elem *left,
+                      const struct list_elem *right, void *aux) {
+  bool (*less)(const struct thread *, const struct thread *) = aux;
+  struct thread *left_thread = list_entry(left, struct thread, elem);
+  struct thread *right_thread = list_entry(right, struct thread, elem);
+  return less(left_thread, right_thread);
+}
+
+static bool lock_priority_aux(const struct lock *left, const struct lock *right) {
+  return left->max_priority < right->max_priority;
+}
+
+static bool less_lock_priority(const struct list_elem *left, const struct list_elem *right, void *aux) {
+  bool (*less)(const struct lock *, const struct lock *) = aux;
+  struct lock *left_lock = list_entry(left, struct lock, elem);
+  struct lock *right_lock = list_entry(right, struct lock, elem);
+  return less(left_lock, right_lock);
+}
+
+bool thread_priority_aux(const struct thread *left, const struct thread *right) {
+  return left->priority < right->priority;
+}
+
+bool less_thread_priority(const struct list_elem *left, const struct list_elem *right, void *aux) {
+  bool (*less)(const struct thread *, const struct thread *) = aux;
+  struct thread *left_thread = list_entry(left, struct thread, elem);
+  struct thread *right_thread = list_entry(right, struct thread, elem);
+  return less(left_thread, right_thread);
+}
+
+
+
+void thread_sleep(int64_t wakeup_time) {
+  enum intr_level old_level;
+  old_level = intr_disable ();
+  struct thread *t = thread_current ();
+  t->wakeup_time = wakeup_time;
+  list_insert_ordered(&sleep_list, &(t->elem), less_sleep, (void *)sleep_aux);
+  thread_block();
+  intr_set_level(old_level);
+}
+
+void thread_alarm(int64_t cur_ticks) {
+  while (list_size(&sleep_list) > 0) {
+    struct list_elem *front = list_front(&sleep_list);
+    struct thread *t = list_entry(front, struct thread, elem);
+    if (cur_ticks >= t->wakeup_time) {
+      list_pop_front(&sleep_list);
+      thread_unblock(t);
+    } else {
+      break;
+    }
+  }
+}
+
+
+
+void adjust_priority(struct thread *t) {
+  if (!list_empty(&t->lock_list)) {
+    struct list_elem *max_elem = list_max(&t->lock_list, less_lock_priority, lock_priority_aux);
+    struct lock *max_lock = list_entry(max_elem, struct lock, elem);
+    if (t->instrinsic_priority < max_lock->max_priority) {
+      t->priority = max_lock->max_priority;
+    }
+  } else {
+    t->priority = t->instrinsic_priority;
+  }
+}
+
+
+/*Recursively flush waiting holder's priority. */
+void flush_priority(struct thread *t) {
+  // while (t->waiting_lock != NULL) {
+  //   if (t->priority > t->waiting_lock->max_priority) {
+  //     t->waiting_lock->max_priority = t->priority;
+  //     struct thread *lock_holder = t->waiting_lock->holder;
+  //     if (lock_holder != NULL) {
+  //       adjust_priority(lock_holder);
+  //       t = lock_holder;
+  //     } else {
+  //       break;
+  //     }
+  //   } else {
+  //     break;
+  //   }
+  // }
+  if (t->waiting_lock != NULL) {
+    if (t->priority > t->waiting_lock->max_priority) {
+      t->waiting_lock->max_priority = t->priority;
+      struct thread *lock_holder = t->waiting_lock->holder;
+      if (lock_holder != NULL) {
+        adjust_priority(lock_holder);
+        flush_priority(lock_holder);
+      }
+    }
+  }
+}
+
+
+

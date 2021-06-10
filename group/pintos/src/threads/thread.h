@@ -90,10 +90,16 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
+    int64_t wakeup_time;                /* Wake up time after pushing into sleep queue. */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+
+    /* Threads list for priority donation. */
+    struct list lock_list;
+    int instrinsic_priority;
+    struct lock *waiting_lock;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -145,5 +151,18 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+
+
+/* Efficient time sleep. */
+void thread_sleep(int64_t);
+void thread_alarm(int64_t);
+
+/* Priority donation. */
+bool thread_priority_aux(const struct thread *left, const struct thread *right);
+bool less_thread_priority(const struct list_elem *left, const struct list_elem *right, void *aux);
+void flush_priority(struct thread *t);
+void adjust_priority(struct thread *t);
+
 
 #endif /* threads/thread.h */
