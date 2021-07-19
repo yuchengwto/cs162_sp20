@@ -47,7 +47,7 @@ bool readdir (int fd, char name[READDIR_MAX_LEN + 1]);
 bool isdir (int fd);
 int inumber (int fd);
 
-/* Homework 5, Part B. */
+/* Homework 6, Part B. */
 void* sbrk (intptr_t increment);
 
 #endif /* lib/user/syscall.h */

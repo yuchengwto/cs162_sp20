@@ -1,0 +1,23 @@
+{
+    "files.associations": {
+        "palloc.h": "c",
+        "pagedir.h": "c",
+        "file.h": "c",
+        "thread.h": "c",
+        "atomic": "c",
+        "*.inc": "c",
+        "exception": "c",
+        "sbrk-simple.h": "c",
+        "string.h": "c",
+        "vaddr.h": "c",
+        "stdbool.h": "c",
+        "list.h": "c",
+        "syscall-nr.h": "c",
+        "syscall.h": "c",
+        "debug.h": "c",
+        "stdint.h": "c",
+        "stdlib.h": "c",
+        "lib.h": "c",
+        "stddef.h": "c"
+    }
+}

@@ -11,16 +11,17 @@
  * */
 
 
-//#define PMD_PFN_MASK
-//#define PTE_PFN_MASK
-//#define PAGE_OFFSET_MASK
-//
-//#define vaddr_pgd(vaddr)
-//#define vaddr_pmd(vaddr)
-//#define vaddr_pte(vaddr)
-//#define vaddr_off(vaddr)
-//
-//#define pfn_to_addr(pfn) (pfn << PAGE_SHIFT)
+#define PMD_PFN_MASK 0x000ffffffffff000
+#define PTE_PFN_MASK 0x000ffffffffff000
+#define PAGE_OFFSET_MASK 0x000ffffffffff000
+
+#define vaddr_pgd(vaddr) vaddr & 0xc0000000
+#define vaddr_pmd(vaddr) vaddr & 0x3fe00000
+#define vaddr_pte(vaddr) vaddr & 0x001ff000
+#define vaddr_off(vaddr) vaddr & 0x00000fff
+
+/* Equal to pfn * page_size. */
+#define pfn_to_addr(pfn) (pfn << PAGE_SHIFT)
 
 
 /* Translates the virtual address vaddr and stores the physical address in paddr.
@@ -29,8 +30,39 @@
 
 int virt_to_phys(vaddr_ptr vaddr, paddr_ptr cr3, paddr_ptr *paddr) {
   /* TODO */
+  paddr_ptr pdpte_p = cr3 + vaddr_pgd(vaddr);
+  uint64_t pdpte;
+  ram_fetch(pdpte_p, &pdpte, 8);
+  
+  paddr_ptr pmd_pfn = pdpte & PMD_PFN_MASK;
+  paddr_ptr pde_p = pfn_to_addr(pmd_pfn) + vaddr_pmd(vaddr);
+  uint64_t pde;
+  ram_fetch(pde_p, &pde, 8);
 
-  return 1;
+  paddr_ptr pte_pfn = pde & PTE_PFN_MASK;
+  paddr_ptr pte_p = pfn_to_addr(pte_pfn) + vaddr_pte(vaddr);
+  uint64_t pte;
+  ram_fetch(pte_p, &pte, 8);
+
+  /* Check pte field rationality. */
+  if (pte >> 6 & 0x1) {
+    if (!(pte >> 1 & 0x1) || !(pte >> 5 & 0x1)) {
+      return 1;
+    }
+  }
+
+  if (pte >> 7 & 0x1) {
+    return 1;
+  }
+
+  if (pte >> 2 & 0x1) {
+    return 1;
+  }
+
+  paddr_ptr page_pfn = pte & PAGE_OFFSET_MASK;
+  *paddr = pfn_to_addr(page_pfn) + vaddr_off(vaddr);
+
+  return 0;
 }
 
 char *str_from_virt(vaddr_ptr vaddr, paddr_ptr cr3) {

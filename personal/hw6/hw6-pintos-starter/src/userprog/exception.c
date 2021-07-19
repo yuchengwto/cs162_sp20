@@ -7,11 +7,16 @@
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
 
+#include "threads/palloc.h"
+#include "userprog/pagedir.h"
+
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+static size_t get_page_idx(void *addr);
+static void grow_page(uint32_t *pd, void *esp, void *fault_addr);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -128,6 +133,7 @@ page_fault (struct intr_frame *f)
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
+  void *esp;         /* Saved esp. */
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -151,6 +157,22 @@ page_fault (struct intr_frame *f)
   user = (f->error_code & PF_U) != 0;
 
   struct thread* t = thread_current ();
+  uint32_t *pd = t->pagedir;
+
+  /* Get esp. */
+  if (!user && t->in_syscall && is_user_vaddr (fault_addr)) {
+    esp = t->user_stack;
+  } else if (user) {
+    esp = f->esp;
+  } else {
+    syscall_exit(-1);
+  }
+
+  /* Detect fault address below esp or not. */
+  if (fault_addr + 32 < esp) {
+    syscall_exit(-1);
+  }
+
 
   /*
    * If we faulted on a user address in kernel mode while handling a syscall,
@@ -161,17 +183,21 @@ page_fault (struct intr_frame *f)
    * the kernel and end up here. These checks below will allow us to determine
    * that this happened and terminate the process appropriately.
    */
-  if (!user && t->in_syscall && is_user_vaddr (fault_addr))
-    syscall_exit (-1);
+  if (!user && t->in_syscall && is_user_vaddr (fault_addr)) {
+    grow_page(pd, esp, fault_addr);
+    return;
+  }
 
   /*
    * If we faulted in user mode, then we assume it's an invalid memory access
-   * and terminate the process. In Homework 5, Part A, you should no longer
+   * and terminate the process. In Homework 6, Part A, you should no longer
    * assume this; depending on the nature of the fault, the stack may need to
    * be grown.
    */
-  if (user)
-    syscall_exit (-1);
+  if (user) {
+    grow_page(pd, esp, fault_addr);
+    return;
+  }
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
@@ -183,3 +209,18 @@ page_fault (struct intr_frame *f)
           user ? "user" : "kernel");
   kill (f);
 }
+
+
+static void grow_page(uint32_t *pd, void *esp, void *fault_addr) {
+   void *uaddr = pg_round_down(fault_addr);
+   while (pagedir_get_page(pd, uaddr)) {
+     uaddr += PGSIZE;
+   }
+   void *kaddr = palloc_get_page(PAL_USER|PAL_ZERO);
+   if (kaddr == NULL) syscall_exit(-1);
+   if (!pagedir_set_page(pd, uaddr, kaddr, true)) {
+     palloc_free_page(kaddr);
+     syscall_exit(-1);
+   }
+}
+

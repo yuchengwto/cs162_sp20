@@ -206,6 +206,8 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
+static void setup_heap (void *search_start);
+
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
@@ -219,6 +221,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
+
+  void *last_pg = 0x0;
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -299,6 +303,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
               if (!load_segment (file, file_page, (void *) mem_page,
                                  read_bytes, zero_bytes, writable))
                 goto done;
+              last_pg = pg_round_down((void *)mem_page);
             }
           else
             goto done;
@@ -309,6 +314,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+
+  /* Set up heap. */
+  setup_heap(last_pg);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -467,4 +475,24 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+
+static void *find_heap_start(void *search_start) {
+  struct thread* t = thread_current ();
+  uint32_t *pd = t->pagedir;
+  void *start = pg_round_up(search_start);
+  while (pagedir_get_page(pd, start))
+  {
+    start += PGSIZE;
+  }
+  return start;
+}
+
+
+static void setup_heap (void *search_start) {
+  void *start = find_heap_start(search_start);
+  struct thread* t = thread_current ();
+  t->heap_start = start;
+  t->brk = start;
 }
