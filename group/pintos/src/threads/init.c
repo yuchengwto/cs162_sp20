@@ -76,6 +76,7 @@ int main (void) NO_RETURN;
 int
 main (void)
 {
+  switch_yield(false);
   char **argv;
 
   /* Clear BSS. */
@@ -126,7 +127,7 @@ main (void)
   locate_block_devices ();
   filesys_init (format_filesys);
 #endif
-
+  switch_yield(true);
   printf ("Boot complete.\n");
 
   /* Run actions specified on kernel command line. */
@@ -406,6 +407,7 @@ static void
 locate_block_device (enum block_type role, const char *name)
 {
   struct block *block = NULL;
+  // printf("%s\t%p\n", name, block);
 
   if (name != NULL)
     {

@@ -165,4 +165,7 @@ void flush_priority(struct thread *t);
 void adjust_priority(struct thread *t);
 
 
+void switch_yield(bool tag);
+
+
 #endif /* threads/thread.h */

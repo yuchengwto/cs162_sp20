@@ -31,6 +31,7 @@
 #include <string.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/init.h"
 
 
 static void flush_lock_priority(struct lock *lock);
@@ -128,7 +129,9 @@ sema_up (struct semaphore *sema)
   sema->value++;
   intr_set_level (old_level);
 
-  thread_yield();
+  if (!intr_context()) {
+    thread_yield();
+  }
 }
 
 static void sema_test_helper (void *sema_);
@@ -281,7 +284,10 @@ lock_release (struct lock *lock)
   flush_lock_priority(lock);
 
   intr_set_level (old_level);
-  thread_yield();
+
+  if (!intr_context()) {
+    thread_yield();
+  }
 }
 
 /* Returns true if the current thread holds LOCK, false

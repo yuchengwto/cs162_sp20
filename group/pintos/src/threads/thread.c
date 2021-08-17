@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/init.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -40,6 +41,9 @@ static struct thread *initial_thread;
 
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
+
+
+static bool enable_yield;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame
@@ -324,6 +328,10 @@ thread_exit (void)
 void
 thread_yield (void)
 {
+  if (!enable_yield) {
+    return;
+  }
+
   struct thread *cur = thread_current ();
   enum intr_level old_level;
 
@@ -367,7 +375,7 @@ thread_set_priority (int new_priority)
 
   intr_set_level (old_level);
 
-  // Defensively yield processor
+  /* Defensively yield processor. */
   thread_yield();
 }
 
@@ -479,14 +487,14 @@ is_thread (struct thread *t)
   return t != NULL && t->magic == THREAD_MAGIC;
 }
 
-static size_t nameLen(const char *name) {
-  size_t idx;
-  for (idx = 0; idx < strlen(name) + 1; idx++) {
-    if (name[idx] == '\0') {
+static size_t get_name_length(const char *name) {
+  size_t length;
+  for (length = 0; length < strlen(name) + 1; length++) {
+    if (name[length] == '\0' || name[length] == ' ') {
       break;
     }
   }
-  return idx;
+  return length;
 }
 
 
@@ -503,7 +511,8 @@ init_thread (struct thread *t, const char *name, int priority)
 
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
-  strlcpy (t->name, name, nameLen(name) + 1);
+  // printf("%s\n", name);
+  strlcpy (t->name, name, get_name_length(name) + 1);
   t->stack = (uint8_t *) t + PGSIZE;
   t->instrinsic_priority = priority;
   t->priority = priority;
@@ -720,20 +729,6 @@ void adjust_priority(struct thread *t) {
 
 /*Recursively flush waiting holder's priority. */
 void flush_priority(struct thread *t) {
-  // while (t->waiting_lock != NULL) {
-  //   if (t->priority > t->waiting_lock->max_priority) {
-  //     t->waiting_lock->max_priority = t->priority;
-  //     struct thread *lock_holder = t->waiting_lock->holder;
-  //     if (lock_holder != NULL) {
-  //       adjust_priority(lock_holder);
-  //       t = lock_holder;
-  //     } else {
-  //       break;
-  //     }
-  //   } else {
-  //     break;
-  //   }
-  // }
   if (t->waiting_lock != NULL) {
     if (t->priority > t->waiting_lock->max_priority) {
       t->waiting_lock->max_priority = t->priority;
@@ -747,4 +742,8 @@ void flush_priority(struct thread *t) {
 }
 
 
+
+void switch_yield(bool tag) {
+  enable_yield = tag;
+}
 

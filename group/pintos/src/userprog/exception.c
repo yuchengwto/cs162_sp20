@@ -159,7 +159,7 @@ page_fault (struct intr_frame *f)
   // kill (f);
 
   /* Set eax to 0xfffffff and save former value into eip. */
-  f->eip = f->eax;
+  f->eip = (void *)f->eax;
   f->eax = 0xffffffff;
 }
 

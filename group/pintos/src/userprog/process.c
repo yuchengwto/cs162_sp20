@@ -193,11 +193,11 @@ void process_exit(void) {
     pagedir_destroy(pd);
   }
 
-  // /* Free all list. */
+  /* Free all list. */
   free_child_list();
   free_file_list();
   
-  // /* Semaphore of process V. */
+  /* Semaphore of process V. */
   sema_up(&cur->pn->sema);
 }
 
