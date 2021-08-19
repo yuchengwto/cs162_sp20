@@ -13,20 +13,8 @@
 
 #define DIRECT_SIZE 124
 #define INDIRECT_SIZE 128
-#define FS_LIMIT 1 << 23
-
+#define FS_LIMIT (1 << 23)
 enum sector_level{DIRECT, SINGLY_INDIRECT, DOUBLY_INDIRECT};
-
-static bool inode_extend(struct inode_disk *, size_t);
-static bool inode_allocate(struct inode_disk *);
-static void inode_deallocate(struct inode_disk *);
-static enum sector_level determine_level(size_t);
-static char sector_zero[BLOCK_SECTOR_SIZE];
-
-struct indirect_block {
-  block_sector_t block_ptr[INDIRECT_SIZE];
-};
-
 
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
@@ -40,6 +28,14 @@ struct inode_disk
     unsigned magic;                     /* Magic number. */
     // uint32_t unused[125];               /* Not used. */
   };
+
+
+static bool inode_extend(struct inode_disk *, size_t);
+static bool inode_allocate(struct inode_disk *);
+static void inode_deallocate(struct inode_disk *);
+static enum sector_level determine_level(size_t);
+static char sector_zero[BLOCK_SECTOR_SIZE];
+
 
 /* Returns the number of sectors to allocate for an inode SIZE
    bytes long. */
@@ -133,11 +129,12 @@ inode_create (block_sector_t sector, off_t length)
   if (disk_inode != NULL)
     {
       size_t sectors = bytes_to_sectors (length);
-      disk_inode->length = length;
+      disk_inode->length = 0;
       disk_inode->magic = INODE_MAGIC;
 
       success = inode_allocate(disk_inode);
       success = inode_extend(disk_inode, length) && success;
+      buffer_cache_write(fs_device, sector, disk_inode, BLOCK_SECTOR_SIZE, 0);
 
       // if (free_map_allocate (sectors, &disk_inode->start))
       //   {
@@ -167,7 +164,7 @@ static enum sector_level determine_level(size_t sector_idx) {
   static size_t singly_indirect_limite = DIRECT_SIZE + INDIRECT_SIZE;
 
   if (sector_idx < direct_limit) {
-    return DIRECT_SIZE;
+    return DIRECT;
   } else if (sector_idx < singly_indirect_limite) {
     return SINGLY_INDIRECT;
   } else {
@@ -201,10 +198,12 @@ static bool inode_extend(struct inode_disk *inode_d, size_t length) {
 
   size_t cur_sectors = bytes_to_sectors(inode_d->length);
   size_t new_sectors = bytes_to_sectors(length);
+  printf("%d\t%d\n", cur_sectors, new_sectors);
 
   block_sector_t block_ptr;
   for (size_t sector_idx = cur_sectors; sector_idx < new_sectors; ++sector_idx) {
     enum sector_level level = determine_level(sector_idx);
+    printf("%d\n", level);
     if (level == DIRECT) {
       /* Direct pointer. */
       if (!free_map_allocate(1, &inode_d->direct[sector_idx])) return false;
@@ -228,6 +227,8 @@ static bool inode_extend(struct inode_disk *inode_d, size_t length) {
       buffer_cache_write(fs_device, block_ptr, sector_zero, BLOCK_SECTOR_SIZE, 0);
     }
   }
+  inode_d->length = length;
+  return true;
 }
 
 /* Deallocate blocks in inode disk structure. */
@@ -238,7 +239,7 @@ static void inode_deallocate(struct inode_disk *inode_d) {
     enum sector_level level = determine_level(sector_idx);
     if (level == DIRECT) {
       /* Direct pointer. */
-      free_map_release(&inode_d->direct[sector_idx], 1);
+      free_map_release(inode_d->direct[sector_idx], 1);
     } else if (level == SINGLY_INDIRECT) {
       /* Singly indirect pointer. */
       size_t singly_sector_idx = sector_idx-DIRECT_SIZE;
@@ -438,7 +439,8 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   size_t necessary_offset = offset + size;
   if (byte_to_sector(inode, necessary_offset) == -1) {
     struct inode_disk *inode_d = calloc(1, sizeof(struct inode_disk));
-    bool extend_success = inode_extend(inode_d, necessary_offset + 1);
+    buffer_cache_read(fs_device, inode->sector, inode_d, BLOCK_SECTOR_SIZE, 0);
+    bool extend_success = inode_extend(inode_d, necessary_offset);
     free(inode_d);
     if (!extend_success) {
       return bytes_written;
