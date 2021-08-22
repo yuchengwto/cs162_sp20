@@ -7,12 +7,39 @@
 #include "filesys/inode.h"
 #include "filesys/directory.h"
 #include "filesys/cache.h"
+#include "threads/thread.h"
 
 
 /* Partition that contains the file system. */
 struct block *fs_device;
 
 static void do_format (void);
+
+/* Extracts a file name part from *SRCP into PART, and updates *SRCP so that the
+next call will return the next file name part. Returns 1 if successful, 0 at
+end of string, -1 for a too-long file name part. */
+static int get_next_part (char part[NAME_MAX + 1], const char **srcp) {
+  const char *src = *srcp;
+  char *dst = part;
+  /* Skip leading slashes. If it’s all slashes, we’re done. */
+  while (*src == '/')
+    src++;
+  if (*src == '\0')
+    return 0;
+  /* Copy up to NAME_MAX character from SRC to DST. Add null terminator. */
+  while (*src != '/' && *src != '\0') {
+    if (dst < part + NAME_MAX)
+      *dst++ = *src;
+    else
+      return -1;
+    src++;
+  }
+  *dst = '\0';
+  /* Advance source pointer. */
+  *srcp = src;
+  return 1;
+}
+
 
 /* Initializes the file system module.
    If FORMAT is true, reformats the file system. */
@@ -107,4 +134,58 @@ do_format (void)
     PANIC ("root directory creation failed");
   free_map_close ();
   printf ("done.\n");
+}
+
+
+
+
+bool parse_path(struct dir **ppdir, char *name, const char *path) {
+  char *path_copy = malloc(strlen(path) + 1);
+  strncpy(path_copy, path, sizeof(char) * (strlen(path) + 1));
+
+  if (path_copy == NULL || path_copy[0] == '\0') {
+    /* Invalid path. */
+    return false;
+  }
+
+  struct inode *curr;
+  struct inode *next;
+  if (path_copy[0] == '/') {
+    /* Absolute path. */
+    curr = next = inode_open(ROOT_DIR_SECTOR);
+  } else {
+    /* Relative path. */
+    curr = next = inode_reopen(thread_current()->cwd);
+  }
+
+  struct dir *_dir;
+  while (get_next_part(name, &path_copy) == 1)
+  {
+    _dir = dir_open(curr);
+    if (!dir_lookup(_dir, name, &next)) return false;
+    dir_close(_dir);
+    
+    if (next == NULL || !inode_isdir(next)) {
+      /* NAME node is not created or is a file at end. */
+      break;
+    }
+
+    /* If run to here, next must be a directory. */
+    curr = next;
+  }
+  
+  /* Parse not completed. */
+  if (get_next_part(name, &path_copy) != 0) {
+    return false;
+  }
+
+  if (curr == next) {
+    /* next is a directory. */
+    strncpy(name, ".", 2);
+  } else {
+    /* next is a file. */
+    inode_close(next);
+  }
+
+  return (*ppdir = dir_open(curr)) != NULL;
 }

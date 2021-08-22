@@ -20,13 +20,11 @@ enum sector_level{DIRECT, SINGLY_INDIRECT, DOUBLY_INDIRECT};
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk
   {
-    // block_sector_t start;               /* First data sector. */
-    block_sector_t direct[DIRECT_SIZE];
+    block_sector_t direct[DIRECT_SIZE]; /* Hierarchical sector pointer. */
     block_sector_t singly_indirect;
     block_sector_t doubly_indirect;
     off_t length;                       /* File size in bytes. */
     unsigned magic;                     /* Magic number. */
-    // uint32_t unused[125];               /* Not used. */
   };
 
 
@@ -53,7 +51,8 @@ struct inode
     int open_cnt;                       /* Number of openers. */
     bool removed;                       /* True if deleted, false otherwise. */
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
-    // struct inode_disk data;             /* Inode content. */
+    bool is_dir;
+    struct inode *parent;
   };
 
 /* Returns the block device sector that contains byte offset POS
@@ -198,12 +197,10 @@ static bool inode_extend(struct inode_disk *inode_d, size_t length) {
 
   size_t cur_sectors = bytes_to_sectors(inode_d->length);
   size_t new_sectors = bytes_to_sectors(length);
-  printf("%d\t%d\n", cur_sectors, new_sectors);
 
   block_sector_t block_ptr;
   for (size_t sector_idx = cur_sectors; sector_idx < new_sectors; ++sector_idx) {
     enum sector_level level = determine_level(sector_idx);
-    printf("%d\n", level);
     if (level == DIRECT) {
       /* Direct pointer. */
       if (!free_map_allocate(1, &inode_d->direct[sector_idx])) return false;
@@ -370,7 +367,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
 
   /* Determine whether read offset beyond the EOF. */
   size_t necessary_offset = offset + size;
-  if (byte_to_sector(inode, necessary_offset) == -1) {
+  if (byte_to_sector(inode, necessary_offset-1) == -1) {
     return bytes_read;
   }
   while (size > 0)
@@ -531,4 +528,9 @@ inode_length (const struct inode *inode)
   off_t length = inode_d->length;
   free(inode_d);
   return length;
+}
+
+
+bool inode_isdir(const struct inode *inode) {
+  return inode->is_dir;
 }

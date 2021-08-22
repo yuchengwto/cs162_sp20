@@ -110,6 +110,9 @@ struct thread
     /* Owned by userprog/syscall.c. */
     struct list file_list;              /* Basically a file table. */
     int next_fd;                        /* Next available file descriptor. */
+
+    /* Proj3 part3. */
+    struct inode *cwd;
 #endif
 
     /* Owned by thread.c. */
