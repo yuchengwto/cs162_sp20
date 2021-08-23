@@ -205,6 +205,7 @@ thread_create (const char *name, int priority,
   sema_init(&pn->sema, 0);
   list_push_back(&running_thread()->child_list, &pn->elem);
   t->pn = pn;
+  t->cwd = thread_current()->cwd;
 #endif
 
   /* Stack frame for kernel_thread(). */
@@ -511,7 +512,6 @@ init_thread (struct thread *t, const char *name, int priority)
 
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
-  // printf("%s\n", name);
   strlcpy (t->name, name, get_name_length(name) + 1);
   t->stack = (uint8_t *) t + PGSIZE;
   t->instrinsic_priority = priority;

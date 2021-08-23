@@ -7,6 +7,8 @@
 #include "lib/kernel/stdio.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/directory.h"
+#include "filesys/free-map.h"
 #include "process.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
@@ -14,6 +16,8 @@
 #include "string.h"
 #include "lib/user/stdlib.h"
 #include "lib/user/syscall.h"
+#include "filesys/inode.h"
+
 
 
 static void syscall_handler (struct intr_frame *);
@@ -30,6 +34,11 @@ static void sys_read(struct intr_frame *, uint32_t *);
 static void sys_write(struct intr_frame *, uint32_t *);
 static void sys_seek(struct intr_frame *, uint32_t *);
 static void sys_tell(struct intr_frame *, uint32_t *);
+static void sys_chdir(struct intr_frame *, uint32_t*);
+static void sys_mkdir(struct intr_frame *, uint32_t*);
+static void sys_readdir(struct intr_frame *, uint32_t*);
+static void sys_isdir(struct intr_frame *, uint32_t*);
+static void sys_inumber(struct intr_frame *, uint32_t*);
 static void sys_halt();
 
 static void error(struct intr_frame *);
@@ -103,6 +112,21 @@ syscall_handler (struct intr_frame *f UNUSED)
   case SYS_TELL:
     sys_tell(f, args);
     break;
+  case SYS_CHDIR:
+    sys_chdir(f, args);
+    break;
+  case SYS_MKDIR:
+    sys_mkdir(f, args);
+    break;
+  case SYS_READDIR:
+    sys_readdir(f, args);
+    break;
+  case SYS_ISDIR:
+    sys_isdir(f, args);
+    break;
+  case SYS_INUMBER:
+    sys_inumber(f, args);
+    break;
   case SYS_HALT:
     sys_halt();
     break;
@@ -112,6 +136,73 @@ syscall_handler (struct intr_frame *f UNUSED)
   }
 }
 
+
+void sys_chdir(struct intr_frame *f UNUSED, uint32_t* args) {
+  const char *path = get_user_ptr((const uint8_t *)(args+1), f);
+  bool success = false;
+
+  struct dir *dir;
+  char name[NAME_MAX + 1];
+  struct inode *node;
+
+  success = parse_path(&dir, name, path);
+  success = dir_lookup(dir, name, &node) && success;
+  dir_close(dir);
+
+  success = inode_isdir(node) && success;
+  thread_current()->cwd = inode_get_inumber(node);
+  f->eax = success;
+}
+
+void sys_mkdir(struct intr_frame *f UNUSED, uint32_t* args) {
+  const char *path = get_user_ptr((const uint8_t *)(args+1), f);
+  bool success = false;
+
+  struct dir *dir;
+  char name[NAME_MAX + 1];
+  block_sector_t dir_sector;
+
+  success = parse_path(&dir, name, path);
+  struct inode *parent = dir_get_inode(dir);
+  block_sector_t parent_n = inode_get_inumber(parent);
+  dir_close(dir);
+
+  success = free_map_allocate(1, &dir_sector) && success;
+  success = dir_create(dir_sector, 1, parent_n) && success;
+  f->eax = success;
+}
+
+void sys_readdir(struct intr_frame *f UNUSED, uint32_t* args) {
+  int fd = get_user_byte((const uint8_t *)(args+1), f);
+  char *name = get_user_ptr((const uint8_t *)(args+2), f);
+
+  struct fnode *fn = get_fn_from_fd(fd);
+  if (fn == NULL) error(f);
+  struct file *fp = fn->file_ptr;
+  struct inode *node = file_get_inode(fp);
+  if (!inode_isdir(node)) error(f);
+  struct dir *dir = dir_open(node);
+  f->eax = dir_readdir(dir, name);
+}
+
+void sys_isdir(struct intr_frame *f UNUSED, uint32_t* args) {
+  int fd = get_user_byte((const uint8_t *)(args+1), f);
+  struct fnode *fn = get_fn_from_fd(fd);
+  if (fn == NULL) error(f);
+  
+  struct file *fp = fn->file_ptr;
+  struct inode *node = file_get_inode(fp);
+  f->eax = inode_isdir(node);
+}
+
+void sys_inumber(struct intr_frame *f UNUSED, uint32_t* args) {
+  int fd = get_user_byte((const uint8_t *)(args+1), f);
+  struct fnode *fn = get_fn_from_fd(fd);
+  if (fn == NULL) error(f);
+  struct file *fp = fn->file_ptr;
+  struct inode *node = file_get_inode(fp);
+  f->eax = inode_get_inumber(node);
+}
 
 void sys_halt() {
   shutdown_power_off();
@@ -136,7 +227,7 @@ void sys_open(struct intr_frame *f UNUSED, uint32_t* args) {
     return;
   }
 
-  // Add opened file to file_list of current thread
+  /* Add opened file to file_list of current thread. */
   struct list *list_f = &thread_current()->file_list;
   struct fnode *fn;
   fn = (struct fnode *)malloc(sizeof(struct fnode));

@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "threads/synch.h"
 #include "threads/fixed-point.h"
+#include "devices/block.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -112,7 +113,7 @@ struct thread
     int next_fd;                        /* Next available file descriptor. */
 
     /* Proj3 part3. */
-    struct inode *cwd;
+    block_sector_t cwd;
 #endif
 
     /* Owned by thread.c. */

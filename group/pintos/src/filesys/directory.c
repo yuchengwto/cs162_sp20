@@ -24,9 +24,21 @@ struct dir_entry
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
 bool
-dir_create (block_sector_t sector, size_t entry_cnt)
+dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent)
 {
-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry));
+  bool success = inode_create (sector, entry_cnt * sizeof (struct dir_entry));
+
+  if (success) {
+    struct inode *node;
+    struct dir *dir;
+
+    ASSERT(node = inode_open(sector) != NULL);
+    ASSERT(dir = dir_open(node) != NULL);
+    ASSERT(dir_add(dir, "..", parent));
+    ASSERT(dir_add(dir, ".", sector));
+    dir_close(dir);
+  }
+  return success;
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -99,7 +111,7 @@ lookup (const struct dir *dir, const char *name,
   ASSERT (name != NULL);
 
   for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
-       ofs += sizeof e)
+       ofs += sizeof e) {
     if (e.in_use && !strcmp (name, e.name))
       {
         if (ep != NULL)
@@ -108,6 +120,7 @@ lookup (const struct dir *dir, const char *name,
           *ofsp = ofs;
         return true;
       }
+  }
   return false;
 }
 
@@ -225,6 +238,10 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
 
   while (inode_read_at (dir->inode, &e, sizeof e, dir->pos) == sizeof e)
     {
+      if (strcmp(e.name, ".") || strcmp(e.name, "..")) {
+        /* Skil . and .. in directory read. */
+        continue;
+      }
       dir->pos += sizeof e;
       if (e.in_use)
         {

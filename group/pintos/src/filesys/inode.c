@@ -11,7 +11,7 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
-#define DIRECT_SIZE 124
+#define DIRECT_SIZE 122
 #define INDIRECT_SIZE 128
 #define FS_LIMIT (1 << 23)
 enum sector_level{DIRECT, SINGLY_INDIRECT, DOUBLY_INDIRECT};
@@ -24,6 +24,8 @@ struct inode_disk
     block_sector_t singly_indirect;
     block_sector_t doubly_indirect;
     off_t length;                       /* File size in bytes. */
+    bool is_dir;
+    block_sector_t parent;
     unsigned magic;                     /* Magic number. */
   };
 
@@ -51,8 +53,6 @@ struct inode
     int open_cnt;                       /* Number of openers. */
     bool removed;                       /* True if deleted, false otherwise. */
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
-    bool is_dir;
-    struct inode *parent;
   };
 
 /* Returns the block device sector that contains byte offset POS
@@ -532,5 +532,21 @@ inode_length (const struct inode *inode)
 
 
 bool inode_isdir(const struct inode *inode) {
-  return inode->is_dir;
+  struct inode_disk *inode_d = malloc(sizeof(struct inode_disk));
+  buffer_cache_read(fs_device, inode->sector, inode_d, BLOCK_SECTOR_SIZE, 0);
+  bool is_dir = inode_d->is_dir;
+  free(inode_d);
+  return is_dir;
 }
+
+
+
+void inode_setdir(struct inode *inode) {
+  struct inode_disk *inode_d = malloc(sizeof(struct inode_disk));
+  buffer_cache_read(fs_device, inode->sector, inode_d, BLOCK_SECTOR_SIZE, 0);
+  inode_d->is_dir = true;
+  /* Update sector dir tag to true. */
+  buffer_cache_write(fs_device, inode->sector, inode_d, BLOCK_SECTOR_SIZE, 0);
+  free(inode_d);
+}
+
