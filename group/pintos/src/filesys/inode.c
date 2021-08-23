@@ -7,6 +7,7 @@
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
 #include "cache.h"
+#include "threads/thread.h"
 
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
@@ -118,7 +119,7 @@ inode_create (block_sector_t sector, off_t length)
   bool success = false;
 
   ASSERT (length >= 0);
-  ASSERT (length <= FS_LIMIT - sizeof(struct inode_disk));
+  ASSERT (length <= (FS_LIMIT - sizeof(struct inode_disk)));
 
   /* If this assertion fails, the inode structure is not exactly
      one sector in size, and you should fix that. */
@@ -550,3 +551,18 @@ void inode_setdir(struct inode *inode) {
   free(inode_d);
 }
 
+
+
+bool inode_isdepend(const struct inode *inode) {
+  bool isdepend = false;
+  if (inode->open_cnt > 0) {
+    isdepend = true;
+  }
+
+  block_sector_t sector = inode->sector;
+  if (thread_contain_cwd(sector)) {
+    isdepend = true;
+  }
+
+  return isdepend;
+}

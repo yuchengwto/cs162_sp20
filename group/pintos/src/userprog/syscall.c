@@ -47,6 +47,7 @@ static bool put_user (uint8_t *, uint8_t);
 static int get_user_byte(const uint8_t *, struct intr_frame *);
 static void *get_user_ptr(const uint8_t *, struct intr_frame *);
 static void put_user_byte(uint8_t *, uint8_t, struct intr_frame *);
+static int get_user_int(const uint8_t *, struct intr_frame *);
 static struct fnode *get_fn_from_fd (int);
 
 
@@ -137,7 +138,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 }
 
 
-void sys_chdir(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_chdir(struct intr_frame *f UNUSED, uint32_t* args) {
   const char *path = get_user_ptr((const uint8_t *)(args+1), f);
   bool success = false;
 
@@ -145,7 +146,7 @@ void sys_chdir(struct intr_frame *f UNUSED, uint32_t* args) {
   char name[NAME_MAX + 1];
   struct inode *node;
 
-  success = parse_path(&dir, name, path);
+  success = parse_path(dir, name, path);
   success = dir_lookup(dir, name, &node) && success;
   dir_close(dir);
 
@@ -154,7 +155,7 @@ void sys_chdir(struct intr_frame *f UNUSED, uint32_t* args) {
   f->eax = success;
 }
 
-void sys_mkdir(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_mkdir(struct intr_frame *f UNUSED, uint32_t* args) {
   const char *path = get_user_ptr((const uint8_t *)(args+1), f);
   bool success = false;
 
@@ -162,7 +163,7 @@ void sys_mkdir(struct intr_frame *f UNUSED, uint32_t* args) {
   char name[NAME_MAX + 1];
   block_sector_t dir_sector;
 
-  success = parse_path(&dir, name, path);
+  success = parse_path(dir, name, path);
   struct inode *parent = dir_get_inode(dir);
   block_sector_t parent_n = inode_get_inumber(parent);
   dir_close(dir);
@@ -172,7 +173,7 @@ void sys_mkdir(struct intr_frame *f UNUSED, uint32_t* args) {
   f->eax = success;
 }
 
-void sys_readdir(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_readdir(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   char *name = get_user_ptr((const uint8_t *)(args+2), f);
 
@@ -185,7 +186,7 @@ void sys_readdir(struct intr_frame *f UNUSED, uint32_t* args) {
   f->eax = dir_readdir(dir, name);
 }
 
-void sys_isdir(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_isdir(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   struct fnode *fn = get_fn_from_fd(fd);
   if (fn == NULL) error(f);
@@ -195,7 +196,7 @@ void sys_isdir(struct intr_frame *f UNUSED, uint32_t* args) {
   f->eax = inode_isdir(node);
 }
 
-void sys_inumber(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_inumber(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   struct fnode *fn = get_fn_from_fd(fd);
   if (fn == NULL) error(f);
@@ -204,22 +205,22 @@ void sys_inumber(struct intr_frame *f UNUSED, uint32_t* args) {
   f->eax = inode_get_inumber(node);
 }
 
-void sys_halt() {
+static void sys_halt() {
   shutdown_power_off();
 }
 
-void sys_create(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_create(struct intr_frame *f UNUSED, uint32_t* args) {
   const char *filename = get_user_ptr((const uint8_t *)(args+1), f);
   unsigned initial_size = get_user_byte((const uint8_t *)(args+2), f);
   f->eax = filesys_create(filename, initial_size);
 }
 
-void sys_remove(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_remove(struct intr_frame *f UNUSED, uint32_t* args) {
   const char *filename = get_user_ptr((const uint8_t *)(args+1), f);
   f->eax = filesys_remove(filename);
 }
 
-void sys_open(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_open(struct intr_frame *f UNUSED, uint32_t* args) {
   const char *filename = get_user_ptr((const uint8_t *)(args+1), f);
   struct file *fp = filesys_open(filename);
   if (fp == NULL) {
@@ -240,7 +241,7 @@ void sys_open(struct intr_frame *f UNUSED, uint32_t* args) {
   f->eax = fn->fd;
 }
 
-void sys_close(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_close(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
 
   // Remove file from file_list of current thread
@@ -259,7 +260,7 @@ void sys_close(struct intr_frame *f UNUSED, uint32_t* args) {
 }
 
 
-void sys_filesize(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_filesize(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   struct fnode *fn = get_fn_from_fd(fd);
   if (fn == NULL) {
@@ -270,7 +271,7 @@ void sys_filesize(struct intr_frame *f UNUSED, uint32_t* args) {
 }
 
 
-void sys_read(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_read(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   void *buffer = get_user_ptr((const uint8_t *)(args+2), f);
   unsigned size = get_user_byte((const uint8_t *)(args+3), f);
@@ -285,12 +286,15 @@ void sys_read(struct intr_frame *f UNUSED, uint32_t* args) {
       error(f);
     }
     struct file *fp = fn->file_ptr;
+    if (inode_isdir(file_get_inode(fp))) {
+      error(f);
+    }
     f->eax = file_read(fp, buffer, size);
   }
 }
 
 
-void sys_write(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_write(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   const void *buffer = get_user_ptr((const uint8_t *)(args+2), f);
   int size = get_user_int((const uint8_t *)(args+3), f);
@@ -306,6 +310,9 @@ void sys_write(struct intr_frame *f UNUSED, uint32_t* args) {
       error(f);
     }
     struct file *fp = fn->file_ptr;
+    if (inode_isdir(file_get_inode(fp))) {
+      error(f);
+    }
     lock_acquire(fn->file_lock);
     f->eax = file_write(fp, buffer, size);
     lock_release(fn->file_lock);
@@ -313,7 +320,7 @@ void sys_write(struct intr_frame *f UNUSED, uint32_t* args) {
 }
 
 
-void sys_seek(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_seek(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   unsigned position = get_user_byte((const uint8_t *)(args+2), f);
   struct fnode *fn = get_fn_from_fd(fd);
@@ -327,7 +334,7 @@ void sys_seek(struct intr_frame *f UNUSED, uint32_t* args) {
 }
 
 
-void sys_tell(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_tell(struct intr_frame *f UNUSED, uint32_t* args) {
   int fd = get_user_byte((const uint8_t *)(args+1), f);
   struct fnode *fn = get_fn_from_fd(fd);
   if (fn == NULL) {
@@ -338,18 +345,18 @@ void sys_tell(struct intr_frame *f UNUSED, uint32_t* args) {
 }
 
 
-void sys_exit(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_exit(struct intr_frame *f UNUSED, uint32_t* args) {
   f->eax = get_user_byte((const uint8_t *)(args+1), f);
   thread_current()->pn->exit_status = f->eax;
-  printf ("%s: exit(%d)\n", &thread_current()->name, f->eax);
+  printf ("%s: exit(%d)\n", thread_current()->name, f->eax);
   thread_exit ();
 }
 
-void sys_practice(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_practice(struct intr_frame *f UNUSED, uint32_t* args) {
   f->eax = get_user_byte((const uint8_t *)(args+1), f) + 1;
 }
 
-void sys_exec(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_exec(struct intr_frame *f UNUSED, uint32_t* args) {
   const char *filename = get_user_ptr((const uint8_t *)(args+1), f);
   // Check the filename string is valid or not
   int idx = 0;
@@ -368,13 +375,13 @@ void sys_exec(struct intr_frame *f UNUSED, uint32_t* args) {
 }
 
 
-void sys_wait(struct intr_frame *f UNUSED, uint32_t* args) {
+static void sys_wait(struct intr_frame *f UNUSED, uint32_t* args) {
   pid_t pid = get_user_byte((const uint8_t *)(args+1), f);
   f->eax = process_wait(pid);
 }
 
 
-int pow16(int n) {
+static int pow16(int n) {
   int r = 1;
   while (n--) {
     r *= 16;
@@ -382,7 +389,7 @@ int pow16(int n) {
   return r;
 }
 
-void *get_user_ptr(const uint8_t *uaddr, struct intr_frame *f) {
+static void *get_user_ptr(const uint8_t *uaddr, struct intr_frame *f) {
   size_t idx = 0;
   int ptr = 0; 
   for (; idx != 4; ++idx) {
@@ -396,7 +403,7 @@ void *get_user_ptr(const uint8_t *uaddr, struct intr_frame *f) {
   return ptr;
 }
 
-int get_user_int(const uint8_t *uaddr, struct intr_frame *f) {
+static int get_user_int(const uint8_t *uaddr, struct intr_frame *f) {
   size_t idx = 0;
   int res = 0; 
   for (; idx != 4; ++idx) {
@@ -405,7 +412,7 @@ int get_user_int(const uint8_t *uaddr, struct intr_frame *f) {
   return res;
 }
 
-int get_user_byte(const uint8_t *uaddr, struct intr_frame *f) {
+static int get_user_byte(const uint8_t *uaddr, struct intr_frame *f) {
   if (is_kernel_vaddr(uaddr)) {
     error(f);
   }
@@ -416,7 +423,7 @@ int get_user_byte(const uint8_t *uaddr, struct intr_frame *f) {
   return result;
 }
 
-void put_user_byte(uint8_t *udst, uint8_t byte, struct intr_frame *f) {
+static void put_user_byte(uint8_t *udst, uint8_t byte, struct intr_frame *f) {
   if (is_kernel_vaddr(udst) || !put_user(udst, byte)) {
     error(f);
   }
@@ -427,7 +434,7 @@ void put_user_byte(uint8_t *udst, uint8_t byte, struct intr_frame *f) {
 UADDR must be below PHYS_BASE.
 Returns the byte value if successful, -1 if a segfault
 occurred. */
-int get_user (const uint8_t *uaddr)
+static int get_user (const uint8_t *uaddr)
 {
   int result;
   asm ("movl $1f, %0; movzbl %1, %0; 1:"
@@ -437,7 +444,7 @@ int get_user (const uint8_t *uaddr)
 /* Writes BYTE to user address UDST.
 UDST must be below PHYS_BASE.
 Returns true if successful, false if a segfault occurred. */
-bool put_user (uint8_t *udst, uint8_t byte)
+static bool put_user (uint8_t *udst, uint8_t byte)
 {
   int error_code;
   asm ("movl $1f, %0; movb %b2, %1; 1:"
@@ -446,7 +453,7 @@ bool put_user (uint8_t *udst, uint8_t byte)
 }
 
 
-struct fnode *get_fn_from_fd(int fd) {
+static struct fnode *get_fn_from_fd(int fd) {
   struct list *list_f = &thread_current()->file_list;
   struct list_elem *e = list_begin(list_f);
   for (; e != list_end(list_f); e = list_next(e)) {
@@ -458,9 +465,9 @@ struct fnode *get_fn_from_fd(int fd) {
 }
 
 
-void error(struct intr_frame *f) {
+static void error(struct intr_frame *f) {
   f->eax = -1;
   thread_current()->pn->exit_status = f->eax;
-  printf ("%s: exit(%d)\n", &thread_current()->name, f->eax);
+  printf ("%s: exit(%d)\n", thread_current()->name, f->eax);
   thread_exit();
 }

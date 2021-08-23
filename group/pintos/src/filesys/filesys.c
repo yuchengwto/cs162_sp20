@@ -8,6 +8,7 @@
 #include "filesys/directory.h"
 #include "filesys/cache.h"
 #include "threads/thread.h"
+#include "threads/malloc.h"
 
 
 /* Partition that contains the file system. */
@@ -83,7 +84,7 @@ filesys_create (const char *name, off_t initial_size)
 
   struct dir *dir;
   char basename[NAME_MAX + 1];
-  if (!parse_path(&dir, basename, name)) return false;
+  if (!parse_path(dir, basename, name)) return false;
 
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
@@ -106,7 +107,7 @@ filesys_open (const char *name)
 {
   struct dir *dir;
   char basename[NAME_MAX + 1];
-  if (!parse_path(&dir, basename, name)) return false;
+  if (!parse_path(dir, basename, name)) return NULL;
 
   struct inode *inode = NULL;
 
@@ -126,9 +127,35 @@ filesys_remove (const char *name)
 {
   struct dir *dir;
   char basename[NAME_MAX + 1];
-  if (!parse_path(&dir, basename, name)) return false;
+  if (!parse_path(dir, basename, name)) return false;
 
-  bool success = dir != NULL && dir_remove (dir, basename);
+  struct inode *inode;
+  if (!dir_lookup(dir, basename, &inode)) {
+    dir_close(dir);
+    return false;
+  }
+  
+  char tmp[NAME_MAX + 1];
+  if (inode_isdir(inode)) {
+    /* Directory. */
+    struct dir *node_dir = dir_open(inode);
+    if (dir_readdir(node_dir, tmp)) {
+      /* Still have file in node_dir. */
+      dir_close(node_dir);
+      dir_close(dir);
+      return false;
+    }
+
+    if (inode_isdepend(inode)) {
+      dir_close(node_dir);
+      dir_close(dir);
+      return false;
+    }
+
+    dir_close(node_dir);
+  }
+  
+  bool success = dir != NULL && dir_remove (dir, basename) && success;
   dir_close (dir);
 
   return success;
@@ -149,9 +176,9 @@ do_format (void)
 
 
 
-bool parse_path(struct dir **ppdir, char *name, const char *path) {
+bool parse_path(struct dir *dir, char *name, const char *path) {
   char *path_copy = malloc(strlen(path) + 1);
-  strncpy(path_copy, path, sizeof(char) * (strlen(path) + 1));
+  strlcpy(path_copy, path, sizeof(char) * (strlen(path) + 1));
 
   if (path_copy == NULL || path_copy[0] == '\0') {
     /* Invalid path. */
@@ -173,7 +200,7 @@ bool parse_path(struct dir **ppdir, char *name, const char *path) {
   }
 
   struct dir *_dir;
-  while (get_next_part(name, &path_copy) == 1)
+  while (get_next_part(name, (const char **)&path_copy) == 1)
   {
     _dir = dir_open(curr);
     if (!dir_lookup(_dir, name, &next)) return false;
@@ -193,17 +220,17 @@ bool parse_path(struct dir **ppdir, char *name, const char *path) {
   }
   
   /* Parse not completed. */
-  if (get_next_part(name, &path_copy) != 0) {
+  if (get_next_part(name, (const char **)&path_copy) != 0) {
     return false;
   }
 
   if (curr == next) {
     /* next is a directory. */
-    strncpy(name, ".", 2);
+    strlcpy(name, ".", 2);
   } else {
     /* next is a file. */
     inode_close(next);
   }
 
-  return (*ppdir = dir_open(curr)) != NULL;
+  return (dir = dir_open(curr)) != NULL;
 }

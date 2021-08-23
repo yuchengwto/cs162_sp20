@@ -172,4 +172,8 @@ void adjust_priority(struct thread *t);
 void switch_yield(bool tag);
 
 
+/* Proj3 part3. */
+bool thread_contain_cwd(block_sector_t);
+
+
 #endif /* threads/thread.h */

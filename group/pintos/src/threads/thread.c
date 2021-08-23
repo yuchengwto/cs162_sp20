@@ -14,6 +14,7 @@
 #include "threads/init.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "filesys/filesys.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -112,6 +113,10 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  /* Set main thread cwd to ROOT. */
+#ifdef USERPROG
+  initial_thread->cwd = ROOT_DIR_SECTOR;
+#endif
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -747,3 +752,22 @@ void switch_yield(bool tag) {
   enable_yield = tag;
 }
 
+
+
+
+bool thread_contain_cwd(block_sector_t sector) {
+  bool contain = false;
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
+  for (struct list_elem *e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+    struct thread *t = list_entry(e, struct thread, allelem);
+    if (t->cwd = sector) {
+      contain = true;
+      break;
+    }
+  }
+
+  intr_set_level(old_level);
+  return contain;
+}

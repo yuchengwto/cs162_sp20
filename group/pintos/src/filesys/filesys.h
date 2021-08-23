@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include "filesys/off_t.h"
+#include "filesys/directory.h"
 
 /* Sectors of system file inodes. */
 #define FREE_MAP_SECTOR 0       /* Free map file inode sector. */
@@ -18,7 +19,7 @@ struct file *filesys_open (const char *name);
 bool filesys_remove (const char *name);
 
 /* Parse input path, save working directory into ppdir and file name into name. */
-bool parse_path(struct dir **ppdir, char *name, const char *path);
+bool parse_path(struct dir *, char *, const char *);
 
 
 #endif /* filesys/filesys.h */

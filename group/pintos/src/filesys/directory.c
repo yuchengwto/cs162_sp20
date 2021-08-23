@@ -32,8 +32,8 @@ dir_create (block_sector_t sector, size_t entry_cnt, block_sector_t parent)
     struct inode *node;
     struct dir *dir;
 
-    ASSERT(node = inode_open(sector) != NULL);
-    ASSERT(dir = dir_open(node) != NULL);
+    ASSERT((node = inode_open(sector)) != NULL);
+    ASSERT((dir = dir_open(node)) != NULL);
     ASSERT(dir_add(dir, "..", parent));
     ASSERT(dir_add(dir, ".", sector));
     dir_close(dir);
@@ -246,8 +246,10 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
       if (e.in_use)
         {
           strlcpy (name, e.name, NAME_MAX + 1);
+          dir->pos = 0;
           return true;
         }
     }
+  dir->pos = 0;
   return false;
 }
