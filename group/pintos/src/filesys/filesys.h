@@ -19,7 +19,7 @@ struct file *filesys_open (const char *name);
 bool filesys_remove (const char *name);
 
 /* Parse input path, save working directory into ppdir and file name into name. */
-bool parse_path(struct dir *, char *, const char *);
+bool parse_path(struct dir **, char *, const char *);
 
 
 #endif /* filesys/filesys.h */

@@ -146,7 +146,7 @@ static void sys_chdir(struct intr_frame *f UNUSED, uint32_t* args) {
   char name[NAME_MAX + 1];
   struct inode *node;
 
-  success = parse_path(dir, name, path);
+  success = parse_path(&dir, name, path);
   success = dir_lookup(dir, name, &node) && success;
   dir_close(dir);
 
@@ -163,7 +163,7 @@ static void sys_mkdir(struct intr_frame *f UNUSED, uint32_t* args) {
   char name[NAME_MAX + 1];
   block_sector_t dir_sector;
 
-  success = parse_path(dir, name, path);
+  success = parse_path(&dir, name, path);
   struct inode *parent = dir_get_inode(dir);
   block_sector_t parent_n = inode_get_inumber(parent);
   dir_close(dir);

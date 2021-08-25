@@ -84,12 +84,13 @@ filesys_create (const char *name, off_t initial_size)
 
   struct dir *dir;
   char basename[NAME_MAX + 1];
-  if (!parse_path(dir, basename, name)) return false;
+  if (!parse_path(&dir, basename, name)) return false;
 
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector)
                   && inode_create (inode_sector, initial_size)
                   && dir_add (dir, basename, inode_sector));
+
   if (!success && inode_sector != 0)
     free_map_release (inode_sector, 1);
   dir_close (dir);
@@ -107,7 +108,7 @@ filesys_open (const char *name)
 {
   struct dir *dir;
   char basename[NAME_MAX + 1];
-  if (!parse_path(dir, basename, name)) return NULL;
+  if (!parse_path(&dir, basename, name)) return NULL;
 
   struct inode *inode = NULL;
 
@@ -127,7 +128,7 @@ filesys_remove (const char *name)
 {
   struct dir *dir;
   char basename[NAME_MAX + 1];
-  if (!parse_path(dir, basename, name)) return false;
+  if (!parse_path(&dir, basename, name)) return false;
 
   struct inode *inode;
   if (!dir_lookup(dir, basename, &inode)) {
@@ -176,7 +177,7 @@ do_format (void)
 
 
 
-bool parse_path(struct dir *dir, char *name, const char *path) {
+bool parse_path(struct dir **dir, char *name, const char *path) {
   char *path_copy = malloc(strlen(path) + 1);
   strlcpy(path_copy, path, sizeof(char) * (strlen(path) + 1));
 
@@ -187,35 +188,27 @@ bool parse_path(struct dir *dir, char *name, const char *path) {
 
   struct inode *curr;
   struct inode *next;
-  bool close_node;
   if (path_copy[0] == '/') {
     /* Absolute path. */
     curr = next = inode_open(ROOT_DIR_SECTOR);
-    close_node = true;
   } else {
     /* Relative path. */
     block_sector_t cwd = thread_current()->cwd;
     curr = next = inode_open(cwd);
-    close_node = false;
   }
 
   struct dir *_dir;
-  while (get_next_part(name, (const char **)&path_copy) == 1)
-  {
+  while (get_next_part(name, (const char **)&path_copy) == 1) {
     _dir = dir_open(curr);
-    if (!dir_lookup(_dir, name, &next)) return false;
-    if (close_node) {
-      dir_close(_dir);
-    } else {
-      close_node = true;
-    }
-    
+    dir_lookup(_dir, name, &next);
+
     if (next == NULL || !inode_isdir(next)) {
       /* NAME node is not created or is a file at end. */
       break;
     }
 
     /* If run to here, next must be a directory. */
+    dir_close(_dir);
     curr = next;
   }
   
@@ -228,9 +221,9 @@ bool parse_path(struct dir *dir, char *name, const char *path) {
     /* next is a directory. */
     strlcpy(name, ".", 2);
   } else {
-    /* next is a file. */
+    /* next is a file or NULL. */
     inode_close(next);
   }
 
-  return (dir = dir_open(curr)) != NULL;
+  return (*dir = dir_open(curr)) != NULL;
 }
